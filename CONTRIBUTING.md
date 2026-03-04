@@ -4,6 +4,8 @@
 
 We use Japanese. 私たちは日本語を使います。
 
+Only log messages should be in English. ログメッセージのみ、英語で書いてください。
+
 ## Start development (開発環境を構築する)
 
 - 1. Clone the repository (リポジトリをクローンする)
