@@ -2,6 +2,9 @@ import os
 
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -16,7 +19,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.command()
-async def join(ctx: commands.Context, arg):
+async def join(ctx: commands.Context):
     # Guild 内で使用されていることを保証する
     if not isinstance(ctx.author, discord.Member):
         await ctx.send("サーバー内でのみ使用できます")
