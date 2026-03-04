@@ -1,3 +1,4 @@
+import logging
 import os
 
 import discord
@@ -7,6 +8,13 @@ from dotenv import load_dotenv
 from rich.console import Console
 
 from audio import VoskSink
+
+# Winows で Opus をロードするためのパスを指定
+# このパスは環境によって異なるため、必要に応じて変更
+#
+# discord.opus.load_opus("C:/msys64/mingw64/bin/libopus-0.dll")
+
+logging.getLogger("discord.ext.voice_recv").setLevel(logging.WARNING)
 
 load_dotenv()
 
@@ -41,6 +49,9 @@ async def join(ctx: commands.Context):
     channel = voice_state.channel
 
     vc = await channel.connect(cls=VoiceRecvClient)
+
+    print(discord.opus.is_loaded())
+
     vc.listen(VoskSink(ctx.channel))
 
     await ctx.send(f"Joined {channel.name}!")
