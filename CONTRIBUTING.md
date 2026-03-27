@@ -1,5 +1,10 @@
 # CONTRIBUTING.md
 
+この文書はRFC2119に従って書かれています。
+
+- [日本語版](https://www.nic.ad.jp/ja/tech/ipa/RFC2119JA.html)
+- [Original version (English)](https://www.rfc-editor.org/rfc/rfc2119)
+
 ## Language for development (開発の為の自然言語)
 
 We use Japanese. 私たちは日本語を使います。
