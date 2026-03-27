@@ -14,9 +14,16 @@ from mituke.bot.events import (
 
 
 class FakeVoiceRecvClient:
-    def __init__(self, *, channel: object | None = None, listening: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        channel: object | None = None,
+        listening: bool = False,
+        sink: object | None = None,
+    ) -> None:
         self.channel = channel
         self._listening = listening
+        self.sink = sink
         self.stop_called = False
         self.disconnect_calls: list[bool] = []
 
@@ -29,6 +36,18 @@ class FakeVoiceRecvClient:
 
     async def disconnect(self, *, force: bool) -> None:
         self.disconnect_calls.append(force)
+
+
+class FakeManagedSink:
+    def __init__(self) -> None:
+        self.request_stop_called = False
+        self.wait_closed_called = False
+
+    def request_stop(self) -> None:
+        self.request_stop_called = True
+
+    async def wait_closed(self) -> None:
+        self.wait_closed_called = True
 
 
 class FakeContext:
@@ -45,7 +64,12 @@ class VoiceStateUpdateTests(unittest.IsolatedAsyncioTestCase):
             name="General",
             members=[SimpleNamespace(bot=True)],
         )
-        voice_client = FakeVoiceRecvClient(channel=connected_channel, listening=True)
+        managed_sink = FakeManagedSink()
+        voice_client = FakeVoiceRecvClient(
+            channel=connected_channel,
+            listening=True,
+            sink=managed_sink,
+        )
         member = SimpleNamespace(guild=SimpleNamespace(voice_client=voice_client))
         before = SimpleNamespace(channel=connected_channel)
         after = SimpleNamespace(channel=None)
@@ -55,6 +79,8 @@ class VoiceStateUpdateTests(unittest.IsolatedAsyncioTestCase):
             await handle_voice_state_update(member, before, after, console)
 
         self.assertTrue(voice_client.stop_called)
+        self.assertTrue(managed_sink.request_stop_called)
+        self.assertTrue(managed_sink.wait_closed_called)
         self.assertEqual(voice_client.disconnect_calls, [True])
         console.log.assert_called_once_with("VC General が空になったため退出しました。")
 

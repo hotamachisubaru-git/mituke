@@ -13,6 +13,7 @@ class RecognitionState:
     committed_texts: list[str] = field(default_factory=list)
     partial_text: str = ""
     last_partial_sent_at: float = 0.0
+    start_announced: bool = False
 
 
 @dataclass

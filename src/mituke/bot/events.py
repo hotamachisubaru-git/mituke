@@ -5,6 +5,8 @@ from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 from rich.console import Console
 
+from mituke.bot.voice import stop_receiving
+
 
 async def handle_voice_state_update(
     member: discord.Member,
@@ -31,8 +33,7 @@ async def handle_voice_state_update(
     if non_bot_members:
         return
 
-    if voice_client.is_listening():
-        voice_client.stop_listening()
+    await stop_receiving(voice_client)
 
     await voice_client.disconnect(force=True)
     console.log(f"VC {connected_channel.name} が空になったため退出しました。")
