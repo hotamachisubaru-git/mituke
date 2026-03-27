@@ -1,31 +1,34 @@
-# CONTRIBUTING.md
+# コントリビューションガイド
 
-## Language for development (開発の為の自然言語)
+## 開発で使う言語
 
-We use Japanese. 私たちは日本語を使います。
+開発時の自然言語は日本語を使います。
+コード内の文言やログも、特別な理由がなければ日本語で統一してください。
 
-Only log messages should be in English. ログメッセージのみ、英語で書いてください。
+## 開発環境の作り方
 
-## Start development (開発環境を構築する)
+1. リポジトリをクローンします。
 
-- 1. Clone the repository (リポジトリをクローンする)
 ```bash
 git clone https://github.com/098orin/mituke
 ```
 
-- 2. Install uv (uv をインストールする)
-  - uv のインストール方法は [公式ドキュメント](https://uv.run/guide/install) を参照してください。
+2. `uv` をインストールします。
 
-- 3. Create a virtual environment (仮想環境を作成する)
+`uv` の導入方法は [公式ドキュメント](https://uv.run/guide/install) を参照してください。
+
+3. 仮想環境を作ります。
+
 ```bash
 uv venv
 ```
 
-- 4. Install dependencies (依存関係をインストールする)
+4. 依存関係をインストールします。
+
 ```bash
 uv sync
 ```
 
-## mitukeの開発フローについて
+## 開発フロー
 
-- 基本的にリポジトリをフォーク、プルリクエストを送信するというスタイルで開発します。
+基本的には、リポジトリをフォークしてからプルリクエストを送る流れで開発します。

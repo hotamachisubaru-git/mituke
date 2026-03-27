@@ -1,14 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "mituke"
 version = "0.1.0"
-description = "Add your description here"
+description = "Discord VC の会話を文字起こししてテキストチャンネルへ送る Bot"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "discord-ext-voice-recv>=0.5.2a179",
     "discord-py>=2.7.1",
-    "load-dotenv>=0.1.0",
+    "python-dotenv>=1.0.1",
     "pynacl==1.5.0",
     "rich>=14.3.3",
     "vosk>=0.3.45",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mituke*"]
