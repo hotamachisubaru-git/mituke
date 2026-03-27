@@ -51,7 +51,7 @@ async def handle_command_error(
     console: Console,
 ) -> None:
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send("不明なコマンドです。`!ヘルプ` で使い方を確認できます。")
+        await ctx.send("不明なコマンドです。`!help` で使い方を確認できます。")
         return
 
     console.log(f"コマンド実行中にエラーが発生しました: {error}")

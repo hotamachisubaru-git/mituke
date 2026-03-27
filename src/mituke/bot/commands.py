@@ -74,7 +74,7 @@ async def stop_listening(ctx: commands.Context) -> None:
 async def show_help(ctx: commands.Context) -> None:
     await ctx.send(
         "使い方:\n"
-        "`!参加` で、あなたが入っている VC に Bot が参加します。\n"
-        "`!退出` で、文字起こしを止めて VC から退出します。\n"
-        "`!ヘルプ` で、この案内をもう一度表示できます。"
+        "`!join` で、あなたが入っている VC に Bot が参加します。\n"
+        "`!leave` で、文字起こしを止めて VC から退出します。\n"
+        "`!help` で、この案内をもう一度表示できます。"
     )

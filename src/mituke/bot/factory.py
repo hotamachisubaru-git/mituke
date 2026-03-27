@@ -23,17 +23,17 @@ def create_bot(settings: Settings, console: Console) -> commands.Bot:
 
     def handle_listen_error(error: Exception | None) -> None:
         if error is not None:
-            console.log(f"音声受信でエラーが発生しました: {error}")
+            console.log(f"音声を受信しているときにエラーが発生しました: {error}")
 
-    @bot.command(name="参加", aliases=["join", "listen"])
+    @bot.command(name="join", aliases=["listen"])
     async def join_command(ctx: commands.Context) -> None:
         await start_listening(ctx, settings, handle_listen_error)
 
-    @bot.command(name="退出", aliases=["leave", "stop"])
+    @bot.command(name="leave", aliases=["stop"])
     async def leave_command(ctx: commands.Context) -> None:
         await stop_listening(ctx)
 
-    @bot.command(name="ヘルプ", aliases=["help"])
+    @bot.command(name="help")
     async def help_command(ctx: commands.Context) -> None:
         await show_help(ctx)
 
