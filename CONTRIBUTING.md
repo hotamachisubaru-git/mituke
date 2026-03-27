@@ -9,7 +9,7 @@
 
 We use Japanese. 私たちは日本語を使います。
 
-Only log messages should be in English. ログメッセージのみ、英語で書いてください。
+Only log messages should be in English. ログメッセージのみ、英語で書くことが推奨されます。
 
 ## Start development (開発環境を構築する)
 
@@ -33,4 +33,4 @@ uv sync
 
 ## mitukeの開発フローについて
 
-- 基本的にリポジトリをフォーク、プルリクエストを送信するというスタイルで開発します。
+- 基本的にリポジトリをフォーク、プルリクエストを送信するというスタイルで開発することになります。
