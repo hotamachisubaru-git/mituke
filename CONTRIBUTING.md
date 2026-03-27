@@ -32,3 +32,11 @@ uv sync
 ## 開発フロー
 
 基本的には、リポジトリをフォークしてからプルリクエストを送る流れで開発します。
+
+## テスト
+
+Discord API キーがなくても、次のコマンドで主要ロジックの回帰確認ができます。
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
