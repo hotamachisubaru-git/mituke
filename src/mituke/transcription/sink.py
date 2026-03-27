@@ -50,16 +50,20 @@ class VoskSink(AudioSink):
         if not pcm:
             return
 
-        mono_16khz_pcm = convert_pcm_48khz_stereo_to_16khz_mono(pcm)
-        if not mono_16khz_pcm:
-            return
-
         should_send_partial = False
         display_text = ""
         now = time.monotonic()
         with self.state_lock:
             current_state = self._get_or_create_state(user.id, user.display_name)
             current_state.display_name = user.display_name
+            mono_16khz_pcm, current_state.resample_state = (
+                convert_pcm_48khz_stereo_to_16khz_mono(
+                    pcm,
+                    current_state.resample_state,
+                )
+            )
+            if not mono_16khz_pcm:
+                return
 
             if current_state.recognizer.AcceptWaveform(mono_16khz_pcm):
                 result = json.loads(current_state.recognizer.Result())
