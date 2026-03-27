@@ -43,6 +43,14 @@ DISCORD_OPUS_PATH=C:\path\to\libopus-0.dll
 uv run python src/main.py
 ```
 
+## テスト
+
+Discord Bot のトークンなしでも、主要な挙動は自動テストで確認できます。
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
+
 ## 使い方
 
 1. Bot を使いたいサーバーのテキストチャンネルで `!join` を実行します。
