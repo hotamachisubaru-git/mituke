@@ -25,9 +25,16 @@ class FakeMember:
 
 
 class FakeVoiceRecvClient:
-    def __init__(self, *, channel: object | None = None, listening: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        channel: object | None = None,
+        listening: bool = False,
+        sink: object | None = None,
+    ) -> None:
         self.channel = channel
         self._listening = listening
+        self.sink = sink
         self.stop_called = False
         self.disconnect_calls: list[bool] = []
         self.move_calls: list[object] = []
@@ -49,6 +56,7 @@ class FakeVoiceRecvClient:
 
     def listen(self, sink: object, *, after: object) -> None:
         self.listen_calls.append((sink, after))
+        self.sink = sink
         self._listening = True
 
 
@@ -85,6 +93,18 @@ class FakeSink:
         self.text_channel = text_channel
         self.model_path = model_path
         self.loop = loop
+
+
+class FakeManagedSink:
+    def __init__(self) -> None:
+        self.request_stop_called = False
+        self.wait_closed_called = False
+
+    def request_stop(self) -> None:
+        self.request_stop_called = True
+
+    async def wait_closed(self) -> None:
+        self.wait_closed_called = True
 
 
 class FakeGuild:
@@ -169,7 +189,12 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         settings = Settings("token", Path("model"), None)
         target_channel = FakeVoiceChannel("Meeting")
         current_channel = FakeVoiceChannel("Lobby")
-        voice_client = FakeVoiceRecvClient(channel=current_channel, listening=True)
+        previous_sink = FakeManagedSink()
+        voice_client = FakeVoiceRecvClient(
+            channel=current_channel,
+            listening=True,
+            sink=previous_sink,
+        )
         ctx = FakeContext(
             guild=FakeGuild(voice_client=voice_client),
             author=FakeMember(voice=SimpleNamespace(channel=target_channel)),
@@ -185,6 +210,8 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
             await start_listening(ctx, settings, Mock())
 
         self.assertTrue(voice_client.stop_called)
+        self.assertTrue(previous_sink.request_stop_called)
+        self.assertTrue(previous_sink.wait_closed_called)
         self.assertEqual(voice_client.move_calls, [target_channel])
         self.assertEqual(target_channel.connect_calls, [])
         self.assertEqual(len(voice_client.listen_calls), 1)
@@ -220,7 +247,8 @@ class StopListeningTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_stops_recognition_and_disconnects(self) -> None:
-        voice_client = FakeVoiceRecvClient(listening=True)
+        managed_sink = FakeManagedSink()
+        voice_client = FakeVoiceRecvClient(listening=True, sink=managed_sink)
         ctx = FakeContext(
             guild=FakeGuild(voice_client=voice_client),
             author=object(),
@@ -231,6 +259,8 @@ class StopListeningTests(unittest.IsolatedAsyncioTestCase):
             await stop_listening(ctx)
 
         self.assertTrue(voice_client.stop_called)
+        self.assertTrue(managed_sink.request_stop_called)
+        self.assertTrue(managed_sink.wait_closed_called)
         self.assertEqual(voice_client.disconnect_calls, [True])
         self.assertEqual(ctx.sent_messages, ["ボイスチャンネルから退出しました。"])
 
