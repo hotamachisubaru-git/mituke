@@ -31,7 +31,7 @@ def install_packet_decoder_guard(console: Console) -> None:
         return
 
     original_decode_packet = PacketDecoder._decode_packet
-    original_process_packet = PacketDecoder._process_packet
+    original_process_packet = getattr(PacketDecoder, "_process_packet", None)
 
     def safe_decode_packet(self: PacketDecoder, packet: Any):
         try:
@@ -42,23 +42,24 @@ def install_packet_decoder_guard(console: Console) -> None:
             _reset_decoder(self)
             return packet, pcm
 
-    def safe_process_packet(self: PacketDecoder, packet: Any):
-        _ensure_dave_passthrough(self)
-        member = _resolve_member(self)
-
-        if _is_non_audio_packet(packet):
-            _remember_packet_position(self, packet)
-            _log_non_audio_packet(console, packet)
-            return VoiceData(packet, member, pcm=b"")
-
-        if not _prepare_dave_audio_packet(self, packet, member, console):
-            _remember_packet_position(self, packet)
-            return VoiceData(packet, member, pcm=b"")
-
-        return original_process_packet(self, packet)
-
     PacketDecoder._decode_packet = safe_decode_packet  # type: ignore[method-assign]
-    PacketDecoder._process_packet = safe_process_packet  # type: ignore[method-assign]
+    if original_process_packet is not None:
+        def safe_process_packet(self: PacketDecoder, packet: Any):
+            _ensure_dave_passthrough(self)
+            member = _resolve_member(self)
+
+            if _is_non_audio_packet(packet):
+                _remember_packet_position(self, packet)
+                _log_non_audio_packet(console, packet)
+                return VoiceData(packet, member, pcm=b"")
+
+            if not _prepare_dave_audio_packet(self, packet, member, console):
+                _remember_packet_position(self, packet)
+                return VoiceData(packet, member, pcm=b"")
+
+            return original_process_packet(self, packet)
+
+        PacketDecoder._process_packet = safe_process_packet  # type: ignore[method-assign]
     setattr(PacketDecoder, PATCH_FLAG, True)
 
 
