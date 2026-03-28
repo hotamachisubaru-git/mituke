@@ -4,8 +4,8 @@ import logging
 import time
 from typing import Any
 
-from discord.opus import Decoder, OpusError
 from discord.ext.voice_recv.opus import PacketDecoder, VoiceData
+from discord.opus import Decoder, OpusError
 from rich.console import Console
 
 try:
