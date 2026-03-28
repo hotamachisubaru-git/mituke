@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from mituke.patches import voice_recv as voice_recv_patch
 
@@ -91,35 +91,78 @@ class VoiceRecvPatchTests(unittest.TestCase):
         dave_session.decrypt.assert_not_called()
         console.log.assert_called_once()
 
-    def test_resolve_member_waits_for_late_ssrc_mapping(self) -> None:
+    def test_resolve_member_uses_current_ssrc_mapping_without_waiting(self) -> None:
         member = SimpleNamespace(id=123)
-        id_results = iter([None, None, 123])
-
-        def get_cached_member():
-            return member if decoder._cached_id == 123 else None
-
         decoder = SimpleNamespace(
             sink=SimpleNamespace(
-                voice_client=SimpleNamespace(
-                    _get_id_from_ssrc=lambda _ssrc: next(id_results)
-                )
+                voice_client=SimpleNamespace(_get_id_from_ssrc=lambda _ssrc: 123)
             ),
             ssrc=42,
             _cached_id=None,
+            _get_cached_member=lambda: member if decoder._cached_id == 123 else None,
         )
-        decoder._get_cached_member = get_cached_member
 
-        with (
-            unittest.mock.patch(
-                "mituke.patches.voice_recv.time.monotonic",
-                side_effect=[0.0, 0.01, 0.02, 0.03],
-            ),
-            unittest.mock.patch("mituke.patches.voice_recv.time.sleep"),
-        ):
-            result = voice_recv_patch._resolve_member(decoder)
+        result = voice_recv_patch._resolve_member(decoder)
 
         self.assertIs(result, member)
         self.assertEqual(decoder._cached_id, 123)
+
+    def test_flush_pending_dave_packets_replays_buffered_audio(self) -> None:
+        console = Mock()
+        member = SimpleNamespace(id=123)
+        dave_session = Mock(ready=True)
+        dave_session.decrypt.return_value = b"decoded-opus"
+        writes: list[tuple[object, object]] = []
+        decoder = SimpleNamespace(
+            sink=SimpleNamespace(
+                write=lambda user, data: writes.append((user, data)),
+                voice_client=SimpleNamespace(
+                    _connection=SimpleNamespace(dave_session=dave_session)
+                ),
+            ),
+            _get_cached_member=lambda: member,
+        )
+        packet = SimpleNamespace(
+            decrypted_data=b"encrypted-opus",
+            is_silence=lambda: False,
+        )
+        setattr(decoder, voice_recv_patch.PENDING_DAVE_PACKETS_FLAG, [packet])
+        processed_data = SimpleNamespace(source=member, pcm=b"pcm")
+        process_packet = Mock(return_value=processed_data)
+
+        voice_recv_patch._flush_pending_dave_packets(
+            decoder,
+            member,
+            process_packet,
+            console,
+        )
+
+        process_packet.assert_called_once_with(decoder, packet)
+        dave_session.decrypt.assert_called_once_with(
+            123,
+            voice_recv_patch.MediaType.audio,
+            b"encrypted-opus",
+        )
+        self.assertEqual(packet.decrypted_data, b"decoded-opus")
+        self.assertEqual(writes, [(member, processed_data)])
+        self.assertEqual(
+            getattr(decoder, voice_recv_patch.PENDING_DAVE_PACKETS_FLAG),
+            [],
+        )
+
+    def test_log_missing_member_for_dave_uses_console_only(self) -> None:
+        console = Mock()
+
+        with (
+            patch("mituke.patches.voice_recv._should_log_warning", return_value=True),
+            patch("mituke.patches.voice_recv.log.warning") as log_warning,
+        ):
+            voice_recv_patch._log_missing_member_for_dave(console)
+
+        log_warning.assert_not_called()
+        console.log.assert_called_once_with(
+            "発話者の対応付け前に暗号化音声を受信したため、そのパケットをスキップして受信を続けます。"
+        )
 
     def test_remember_packet_position_updates_decoder_state(self) -> None:
         decoder = SimpleNamespace(_last_seq=-1, _last_ts=-1)

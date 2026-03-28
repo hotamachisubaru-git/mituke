@@ -21,14 +21,14 @@ log = logging.getLogger(__name__)
 PATCH_FLAG = "__mituke_packet_decoder_guard_installed__"
 DAVE_PASSTHROUGH_FLAG = "__mituke_dave_passthrough_enabled__"
 FLUSH_WARNING_FILTER_FLAG = "__mituke_decoder_flush_warning_filter__"
+PENDING_DAVE_PACKETS_FLAG = "__mituke_pending_dave_packets__"
 OPUS_AUDIO_PAYLOAD_TYPE = 120
 WARNING_INTERVAL_SECONDS = 5.0
 WARNING_INTERVALS_BY_KEY = {
     "decoder_flush_loss": 30.0,
     "missing_member_for_dave": 30.0,
 }
-SSRC_MAPPING_WAIT_SECONDS = 0.1
-SSRC_MAPPING_POLL_SECONDS = 0.01
+MAX_PENDING_DAVE_PACKETS = 8
 FALLBACK_PCM = b"\x00\x00" * Decoder.SAMPLES_PER_FRAME * Decoder.CHANNELS
 DECODER_FLUSH_WARNING_TEXT = "packets were lost being flushed in decoder"
 _last_warning_at: dict[str, float] = {}
@@ -41,6 +41,7 @@ def install_packet_decoder_guard(console: Console) -> None:
 
     original_decode_packet = PacketDecoder._decode_packet
     original_process_packet = getattr(PacketDecoder, "_process_packet", None)
+    original_set_user_id = getattr(PacketDecoder, "set_user_id", None)
 
     def safe_decode_packet(self: PacketDecoder, packet: Any):
         try:
@@ -57,10 +58,21 @@ def install_packet_decoder_guard(console: Console) -> None:
         def safe_process_packet(self: PacketDecoder, packet: Any):
             _ensure_dave_passthrough(self)
             member = _resolve_member(self)
+            if member is not None:
+                _flush_pending_dave_packets(
+                    self,
+                    member,
+                    original_process_packet,
+                    console,
+                )
 
             if _is_non_audio_packet(packet):
                 _remember_packet_position(self, packet)
                 _log_non_audio_packet(console, packet)
+                return VoiceData(packet, member, pcm=b"")
+
+            if _should_defer_dave_packet(self, packet, member):
+                _defer_dave_packet(self, packet, console)
                 return VoiceData(packet, member, pcm=b"")
 
             if not _prepare_dave_audio_packet(self, packet, member, console):
@@ -70,6 +82,21 @@ def install_packet_decoder_guard(console: Console) -> None:
             return original_process_packet(self, packet)
 
         PacketDecoder._process_packet = safe_process_packet  # type: ignore[method-assign]
+        if original_set_user_id is not None:
+
+            def safe_set_user_id(self: PacketDecoder, user_id: int) -> None:
+                original_set_user_id(self, user_id)
+                member = _resolve_member(self)
+                if member is None:
+                    return
+                _flush_pending_dave_packets(
+                    self,
+                    member,
+                    original_process_packet,
+                    console,
+                )
+
+            PacketDecoder.set_user_id = safe_set_user_id  # type: ignore[method-assign]
     setattr(PacketDecoder, PATCH_FLAG, True)
 
 
@@ -140,21 +167,12 @@ def _resolve_member(decoder: PacketDecoder) -> Any:
     if voice_client is None:
         return None
 
-    deadline = time.monotonic() + SSRC_MAPPING_WAIT_SECONDS
-    while True:
-        try:
-            decoder._cached_id = voice_client._get_id_from_ssrc(decoder.ssrc)  # type: ignore[attr-defined]
-        except Exception:
-            return None
+    try:
+        decoder._cached_id = voice_client._get_id_from_ssrc(decoder.ssrc)  # type: ignore[attr-defined]
+    except Exception:
+        return None
 
-        member = decoder._get_cached_member()
-        if member is not None:
-            return member
-
-        if time.monotonic() >= deadline:
-            return None
-
-        time.sleep(SSRC_MAPPING_POLL_SECONDS)
+    return decoder._get_cached_member()
 
 
 def _is_non_audio_packet(packet: Any) -> bool:
@@ -202,6 +220,75 @@ def _prepare_dave_audio_packet(
     return True
 
 
+def _should_defer_dave_packet(
+    decoder: PacketDecoder,
+    packet: Any,
+    member: Any,
+) -> bool:
+    if member is not None or not HAS_DAVE or MediaType is None or not packet:
+        return False
+
+    is_silence = getattr(packet, "is_silence", None)
+    if callable(is_silence) and is_silence():
+        return False
+
+    decrypted_data = getattr(packet, "decrypted_data", None)
+    if decrypted_data is None:
+        return False
+
+    voice_client = getattr(decoder.sink, "voice_client", None)
+    connection = getattr(voice_client, "_connection", None)
+    dave_session = getattr(connection, "dave_session", None)
+    return dave_session is not None and getattr(dave_session, "ready", False)
+
+
+def _get_pending_dave_packets(decoder: PacketDecoder) -> list[Any]:
+    pending_packets = getattr(decoder, PENDING_DAVE_PACKETS_FLAG, None)
+    if pending_packets is None:
+        pending_packets = []
+        setattr(decoder, PENDING_DAVE_PACKETS_FLAG, pending_packets)
+    return pending_packets
+
+
+def _defer_dave_packet(
+    decoder: PacketDecoder,
+    packet: Any,
+    console: Console,
+) -> None:
+    pending_packets = _get_pending_dave_packets(decoder)
+    pending_packets.append(packet)
+    if len(pending_packets) <= MAX_PENDING_DAVE_PACKETS:
+        return
+
+    pending_packets.pop(0)
+    _log_missing_member_for_dave(console)
+
+
+def _flush_pending_dave_packets(
+    decoder: PacketDecoder,
+    member: Any,
+    process_packet,
+    console: Console,
+) -> None:
+    pending_packets = _get_pending_dave_packets(decoder)
+    if not pending_packets:
+        return
+
+    buffered_packets = pending_packets.copy()
+    pending_packets.clear()
+    for buffered_packet in buffered_packets:
+        if _should_defer_dave_packet(decoder, buffered_packet, member):
+            pending_packets.append(buffered_packet)
+            continue
+
+        if not _prepare_dave_audio_packet(decoder, buffered_packet, member, console):
+            _remember_packet_position(decoder, buffered_packet)
+            continue
+
+        voice_data = process_packet(decoder, buffered_packet)
+        decoder.sink.write(voice_data.source, voice_data)
+
+
 def _remember_packet_position(decoder: PacketDecoder, packet: Any) -> None:
     sequence = getattr(packet, "sequence", None)
     if sequence is not None:
@@ -228,8 +315,8 @@ def _log_corrupted_packet(console: Console, error: OpusError) -> None:
         return
 
     message = "壊れた音声パケットを検知したため、その区間を無音補完して受信を続けます。"
-    log.warning("%s detail=%s", message, error)
-    console.log(message)
+    log.debug("%s detail=%s", message, error)
+    console.log(f"{message} detail={error}")
 
 
 def _log_non_audio_packet(console: Console, packet: Any) -> None:
@@ -238,7 +325,7 @@ def _log_non_audio_packet(console: Console, packet: Any) -> None:
 
     payload = getattr(packet, "payload", None)
     message = "音声以外の RTP パケットを検知したため、そのパケットをスキップして受信を続けます。"
-    log.warning("%s payload=%s", message, payload)
+    log.debug("%s payload=%s", message, payload)
     console.log(message)
 
 
@@ -247,7 +334,7 @@ def _log_missing_member_for_dave(console: Console) -> None:
         return
 
     message = "発話者の対応付け前に暗号化音声を受信したため、そのパケットをスキップして受信を続けます。"
-    log.warning(message)
+    log.debug(message)
     console.log(message)
 
 
@@ -256,5 +343,5 @@ def _log_dave_decrypt_failure(console: Console, error: Exception) -> None:
         return
 
     message = "DAVE 復号に失敗した音声パケットを検知したため、そのパケットだけスキップして受信を続けます。"
-    log.warning("%s detail=%s", message, error)
-    console.log(message)
+    log.debug("%s detail=%s", message, error)
+    console.log(f"{message} detail={error}")
