@@ -33,7 +33,9 @@ class FakePacketDecoder:
 
 
 class PacketDecoderGuardTests(unittest.TestCase):
-    def test_replaces_corrupted_packet_with_concealed_pcm_and_resets_decoder(self) -> None:
+    def test_replaces_corrupted_packet_with_concealed_pcm_and_resets_decoder(
+        self,
+    ) -> None:
         console = Mock()
 
         with (

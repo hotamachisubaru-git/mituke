@@ -56,6 +56,4 @@ async def handle_command_error(
         return
 
     console.log(f"コマンド実行中にエラーが発生しました: {error}")
-    await ctx.send(
-        "コマンドの実行中にエラーが発生しました。ログを確認してください。"
-    )
+    await ctx.send("コマンドの実行中にエラーが発生しました。ログを確認してください。")

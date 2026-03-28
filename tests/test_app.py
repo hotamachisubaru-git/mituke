@@ -15,7 +15,9 @@ class RunTests(unittest.TestCase):
         with (
             patch("mituke.app.load_settings", return_value=settings) as load_settings,
             patch("mituke.app.configure_opus") as configure_opus,
-            patch("mituke.app.install_packet_decoder_guard") as install_packet_decoder_guard,
+            patch(
+                "mituke.app.install_packet_decoder_guard"
+            ) as install_packet_decoder_guard,
             patch("mituke.app.create_bot", return_value=bot) as create_bot,
         ):
             run()

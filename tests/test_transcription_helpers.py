@@ -15,7 +15,9 @@ class NormalizeTranscriptTests(unittest.TestCase):
         self.assertEqual(normalize_transcript("  hello   world  "), "hello world")
 
     def test_joins_japanese_words_without_spaces(self) -> None:
-        self.assertEqual(normalize_transcript("  今日は  いい 天気  "), "今日はいい天気")
+        self.assertEqual(
+            normalize_transcript("  今日は  いい 天気  "), "今日はいい天気"
+        )
 
     def test_keeps_spaces_when_latin_text_is_present(self) -> None:
         self.assertEqual(
@@ -106,7 +108,9 @@ class ConvertPcmTests(unittest.TestCase):
         first_chunk = stereo_samples[:8]
         second_chunk = stereo_samples[8:]
 
-        converted_stream = converter.convert(first_chunk) + converter.convert(second_chunk)
+        converted_stream = converter.convert(first_chunk) + converter.convert(
+            second_chunk
+        )
         converted_full = convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples)
 
         self.assertEqual(converted_stream, converted_full)

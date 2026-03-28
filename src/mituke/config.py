@@ -26,8 +26,7 @@ def load_settings() -> Settings:
         )
 
     model_path_text = (
-        os.getenv("VOSK_MODEL_PATH", "").strip()
-        or os.getenv("MODEL_PATH", "").strip()
+        os.getenv("VOSK_MODEL_PATH", "").strip() or os.getenv("MODEL_PATH", "").strip()
     )
     if not model_path_text:
         raise RuntimeError(

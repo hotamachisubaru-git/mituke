@@ -153,7 +153,9 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         sink.request_stop()
         await sink.wait_closed()
 
-    async def test_start_event_and_audio_fallback_do_not_duplicate_message(self) -> None:
+    async def test_start_event_and_audio_fallback_do_not_duplicate_message(
+        self,
+    ) -> None:
         sink = VoskSink(
             text_channel=self.text_channel,
             model_path=Path("."),

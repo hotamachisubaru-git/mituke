@@ -44,6 +44,7 @@ def install_packet_decoder_guard(console: Console) -> None:
 
     PacketDecoder._decode_packet = safe_decode_packet  # type: ignore[method-assign]
     if original_process_packet is not None:
+
         def safe_process_packet(self: PacketDecoder, packet: Any):
             _ensure_dave_passthrough(self)
             member = _resolve_member(self)
@@ -182,9 +183,7 @@ def _log_corrupted_packet(console: Console, error: OpusError) -> None:
     if not _should_log_warning("corrupted_packet"):
         return
 
-    message = (
-        "壊れた音声パケットを検知したため、その区間を無音補完して受信を続けます。"
-    )
+    message = "壊れた音声パケットを検知したため、その区間を無音補完して受信を続けます。"
     log.warning("%s detail=%s", message, error)
     console.log(message)
 
@@ -194,9 +193,7 @@ def _log_non_audio_packet(console: Console, packet: Any) -> None:
         return
 
     payload = getattr(packet, "payload", None)
-    message = (
-        "音声以外の RTP パケットを検知したため、そのパケットをスキップして受信を続けます。"
-    )
+    message = "音声以外の RTP パケットを検知したため、そのパケットをスキップして受信を続けます。"
     log.warning("%s payload=%s", message, payload)
     console.log(message)
 
@@ -205,9 +202,7 @@ def _log_missing_member_for_dave(console: Console) -> None:
     if not _should_log_warning("missing_member_for_dave"):
         return
 
-    message = (
-        "発話者の対応付け前に暗号化音声を受信したため、そのパケットをスキップして受信を続けます。"
-    )
+    message = "発話者の対応付け前に暗号化音声を受信したため、そのパケットをスキップして受信を続けます。"
     log.warning(message)
     console.log(message)
 
@@ -216,8 +211,6 @@ def _log_dave_decrypt_failure(console: Console, error: Exception) -> None:
     if not _should_log_warning("dave_decrypt_failure"):
         return
 
-    message = (
-        "DAVE 復号に失敗した音声パケットを検知したため、そのパケットだけスキップして受信を続けます。"
-    )
+    message = "DAVE 復号に失敗した音声パケットを検知したため、そのパケットだけスキップして受信を続けます。"
     log.warning("%s detail=%s", message, error)
     console.log(message)

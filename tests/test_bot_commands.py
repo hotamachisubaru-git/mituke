@@ -71,7 +71,9 @@ class FakeOtherVoiceClient:
 
 
 class FakeVoiceChannel:
-    def __init__(self, name: str, connected_client: FakeVoiceRecvClient | None = None) -> None:
+    def __init__(
+        self, name: str, connected_client: FakeVoiceRecvClient | None = None
+    ) -> None:
         self.name = name
         self.connected_client = connected_client or FakeVoiceRecvClient(channel=self)
         self.connect_calls: list[object] = []
@@ -115,7 +117,9 @@ class FakeGuild:
 
 
 class FakeContext:
-    def __init__(self, *, guild: object | None, author: object, channel: object) -> None:
+    def __init__(
+        self, *, guild: object | None, author: object, channel: object
+    ) -> None:
         self.guild = guild
         self.author = author
         self.channel = channel
@@ -169,7 +173,9 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
             patch("mituke.bot.commands.discord.Member", FakeMember),
             patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
             patch("mituke.bot.commands.VoskSink", FakeSink),
-            patch("mituke.bot.commands.asyncio.get_running_loop", return_value=fake_loop),
+            patch(
+                "mituke.bot.commands.asyncio.get_running_loop", return_value=fake_loop
+            ),
         ):
             await start_listening(ctx, settings, handle_listen_error)
 
@@ -184,7 +190,9 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(after, handle_listen_error)
         self.assertEqual(
             ctx.sent_messages,
-            ["VC `General` へ参加しました。 これからこのチャンネルで文字起こしを送ります。"],
+            [
+                "VC `General` へ参加しました。 これからこのチャンネルで文字起こしを送ります。"
+            ],
         )
 
     async def test_moves_existing_voice_client_and_restarts_recognition(self) -> None:
@@ -207,7 +215,9 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
             patch("mituke.bot.commands.discord.Member", FakeMember),
             patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
             patch("mituke.bot.commands.VoskSink", FakeSink),
-            patch("mituke.bot.commands.asyncio.get_running_loop", return_value=object()),
+            patch(
+                "mituke.bot.commands.asyncio.get_running_loop", return_value=object()
+            ),
         ):
             await start_listening(ctx, settings, Mock())
 
@@ -221,7 +231,9 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(voice_client.listen_calls), 1)
         self.assertEqual(
             ctx.sent_messages,
-            ["VC `Meeting` へ参加しました。 これからこのチャンネルで文字起こしを送ります。"],
+            [
+                "VC `Meeting` へ参加しました。 これからこのチャンネルで文字起こしを送ります。"
+            ],
         )
 
     async def test_clears_stale_source_mapping_before_starting(self) -> None:
@@ -238,7 +250,9 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
             patch("mituke.bot.commands.discord.Member", FakeMember),
             patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
             patch("mituke.bot.commands.VoskSink", FakeSink),
-            patch("mituke.bot.commands.asyncio.get_running_loop", return_value=object()),
+            patch(
+                "mituke.bot.commands.asyncio.get_running_loop", return_value=object()
+            ),
         ):
             await start_listening(ctx, settings, Mock())
 

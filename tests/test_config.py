@@ -85,7 +85,9 @@ class LoadSettingsTests(unittest.TestCase):
                     clear=True,
                 ),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Vosk モデルが見つかりません"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Vosk モデルが見つかりません"
+                ):
                     load_settings()
 
     def test_requires_existing_opus_file(self) -> None:
@@ -107,7 +109,8 @@ class LoadSettingsTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaisesRegex(
-                    RuntimeError, "DISCORD_OPUS_PATH で指定されたファイルが見つかりません"
+                    RuntimeError,
+                    "DISCORD_OPUS_PATH で指定されたファイルが見つかりません",
                 ):
                     load_settings()
 

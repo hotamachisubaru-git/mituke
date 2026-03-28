@@ -243,7 +243,9 @@ class VoskSink(AudioSink):
         try:
             self.loop.call_soon_threadsafe(self.event_queue.put_nowait, event)
         except RuntimeError:
-            console.log("イベントループ停止後のため、文字起こしイベントを破棄しました。")
+            console.log(
+                "イベントループ停止後のため、文字起こしイベントを破棄しました。"
+            )
 
     def _remember_pending_audio(
         self,
@@ -327,4 +329,6 @@ class VoskSink(AudioSink):
         try:
             self.loop.call_soon_threadsafe(enqueue_cleanup)
         except RuntimeError:
-            console.log("イベントループ停止後のため、文字起こしワーカーを終了できませんでした。")
+            console.log(
+                "イベントループ停止後のため、文字起こしワーカーを終了できませんでした。"
+            )
