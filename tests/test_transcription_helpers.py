@@ -54,6 +54,10 @@ class ConvertPcmTests(unittest.TestCase):
 
         expected = array("h", [6000]).tobytes()
 
+        converted, _ = convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples.tobytes())
+
+        self.assertEqual(converted, expected)
+
     def test_keeps_resample_state_across_chunks(self) -> None:
         first_chunk = array(
             "h",
@@ -85,6 +89,9 @@ class ConvertPcmTests(unittest.TestCase):
             state,
         )
 
+        self.assertIsNotNone(next_state)
+        self.assertEqual(converted_first + converted_second, combined)
+
     def test_stream_converter_keeps_resampling_state_across_chunks(self) -> None:
         stereo_samples = array(
             "h",
@@ -111,6 +118,6 @@ class ConvertPcmTests(unittest.TestCase):
         converted_stream = converter.convert(first_chunk) + converter.convert(
             second_chunk
         )
-        converted_full = convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples)
+        converted_full, _ = convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples)
 
         self.assertEqual(converted_stream, converted_full)
