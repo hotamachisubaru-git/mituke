@@ -12,7 +12,6 @@ from discord.ext.voice_recv import AudioSink
 from rich.console import Console
 from vosk import KaldiRecognizer
 
-from mituke.transcription.audio import convert_pcm_48khz_stereo_to_16khz_mono
 from mituke.transcription.model import load_vosk_model
 from mituke.transcription.state import MessageState, RecognitionState, SinkEvent
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
@@ -61,12 +60,7 @@ class VoskSink(AudioSink):
             pending_audio = self._take_pending_audio(ssrc, now)
             current_state = self._get_or_create_state(user.id, user.display_name)
             current_state.display_name = user.display_name
-            mono_16khz_pcm, current_state.resample_state = (
-                convert_pcm_48khz_stereo_to_16khz_mono(
-                    pcm,
-                    current_state.resample_state,
-                )
-            )
+            mono_16khz_pcm = current_state.pcm_converter.convert(pcm)
             if not mono_16khz_pcm:
                 return
 

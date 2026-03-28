@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from array import array
 
-from mituke.transcription.audio import convert_pcm_48khz_stereo_to_16khz_mono
+from mituke.transcription.audio import (
+    DiscordPcmConverter,
+    convert_pcm_48khz_stereo_to_16khz_mono,
+)
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
 
 
@@ -48,12 +51,6 @@ class ConvertPcmTests(unittest.TestCase):
         )
 
         expected = array("h", [6000]).tobytes()
-        converted, state = convert_pcm_48khz_stereo_to_16khz_mono(
-            stereo_samples.tobytes()
-        )
-
-        self.assertEqual(converted, expected)
-        self.assertIsNotNone(state)
 
     def test_keeps_resample_state_across_chunks(self) -> None:
         first_chunk = array(
@@ -86,5 +83,30 @@ class ConvertPcmTests(unittest.TestCase):
             state,
         )
 
-        self.assertEqual(converted_first + converted_second, combined)
-        self.assertIsNotNone(next_state)
+    def test_stream_converter_keeps_resampling_state_across_chunks(self) -> None:
+        stereo_samples = array(
+            "h",
+            [
+                1000,
+                3000,
+                2000,
+                4000,
+                3000,
+                5000,
+                4000,
+                6000,
+                5000,
+                7000,
+                6000,
+                8000,
+            ],
+        ).tobytes()
+        converter = DiscordPcmConverter()
+
+        first_chunk = stereo_samples[:8]
+        second_chunk = stereo_samples[8:]
+
+        converted_stream = converter.convert(first_chunk) + converter.convert(second_chunk)
+        converted_full = convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples)
+
+        self.assertEqual(converted_stream, converted_full)
