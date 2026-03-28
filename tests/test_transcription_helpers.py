@@ -6,6 +6,8 @@ from array import array
 from mituke.transcription.audio import (
     DiscordPcmConverter,
     convert_pcm_48khz_stereo_to_16khz_mono,
+    has_voice_activity,
+    trim_leading_silence,
 )
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
 
@@ -121,3 +123,21 @@ class ConvertPcmTests(unittest.TestCase):
         converted_full, _ = convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples)
 
         self.assertEqual(converted_stream, converted_full)
+
+    def test_detects_voice_activity_from_non_silent_pcm(self) -> None:
+        silent_pcm = array("h", [0] * 320).tobytes()
+        voiced_pcm = array("h", [1200] * 320).tobytes()
+
+        self.assertFalse(has_voice_activity(silent_pcm))
+        self.assertTrue(has_voice_activity(voiced_pcm))
+
+    def test_trims_leading_silence_before_first_voiced_frame(self) -> None:
+        silent_frame = array("h", [0] * 320).tobytes()
+        voiced_frame = array("h", [1600] * 320).tobytes()
+
+        trimmed = trim_leading_silence(
+            silent_frame + silent_frame + voiced_frame,
+            preroll_frames=0,
+        )
+
+        self.assertEqual(trimmed, voiced_frame)
