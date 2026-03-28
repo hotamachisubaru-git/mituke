@@ -2,23 +2,42 @@ from __future__ import annotations
 
 import asyncio
 import json
+import queue
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import discord
+from discord.opus import Decoder
 from discord.ext.voice_recv import AudioSink
 from rich.console import Console
 from vosk import KaldiRecognizer
 
+from mituke.transcription.audio import (
+    PCM_SAMPLE_WIDTH_BYTES,
+    convert_pcm_48khz_stereo_to_16khz_mono,
+)
 from mituke.transcription.model import load_vosk_model
 from mituke.transcription.state import MessageState, RecognitionState, SinkEvent
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
 
 console = Console()
 PENDING_AUDIO_RETENTION_SECONDS = 1.0
-PENDING_AUDIO_MAX_BYTES = 16000 * 2
+PENDING_AUDIO_MAX_BYTES = (
+    Decoder.SAMPLING_RATE * Decoder.CHANNELS * PCM_SAMPLE_WIDTH_BYTES
+)
+
+
+@dataclass(frozen=True)
+class RecognitionTask:
+    kind: str
+    user_id: int | None = None
+    display_name: str = ""
+    pcm: bytes = b""
+    ssrc: int | None = None
+    received_at: float = 0.0
 
 
 class VoskSink(AudioSink):
@@ -39,8 +58,15 @@ class VoskSink(AudioSink):
         self.pending_audio_by_ssrc: dict[int, tuple[float, bytearray]] = {}
         self.state_lock = threading.Lock()
         self.shutdown_requested = threading.Event()
+        self.processing_queue: queue.Queue[RecognitionTask] = queue.Queue()
+        self.processor_thread = threading.Thread(
+            target=self._recognition_worker,
+            name="mituke-vosk-recognition",
+            daemon=True,
+        )
         self.event_queue: asyncio.Queue[SinkEvent] = asyncio.Queue()
         self.worker_task = loop.create_task(self._event_worker())
+        self.processor_thread.start()
 
     def wants_opus(self) -> bool:
         return False
@@ -53,23 +79,115 @@ class VoskSink(AudioSink):
         if not pcm:
             return
 
-        should_send_partial = False
+        packet = getattr(data, "packet", None)
+        self._enqueue_recognition_task(
+            RecognitionTask(
+                kind="audio",
+                user_id=None if user is None else user.id,
+                display_name="" if user is None else user.display_name,
+                pcm=pcm,
+                ssrc=getattr(packet, "ssrc", None),
+                received_at=time.monotonic(),
+            )
+        )
+
+    @AudioSink.listener()
+    def on_voice_member_speaking_start(self, member: discord.Member) -> None:
+        if self.shutdown_requested.is_set() or member.bot:
+            return
+
+        self._enqueue_recognition_task(
+            RecognitionTask(
+                kind="start",
+                user_id=member.id,
+                display_name=member.display_name,
+            )
+        )
+
+    @AudioSink.listener()
+    def on_voice_member_speaking_stop(self, member: discord.Member) -> None:
+        if self.shutdown_requested.is_set() or member.bot:
+            return
+
+        self._enqueue_recognition_task(
+            RecognitionTask(
+                kind="stop",
+                user_id=member.id,
+                display_name=member.display_name,
+            )
+        )
+
+    def _recognition_worker(self) -> None:
+        while True:
+            task = self.processing_queue.get()
+            try:
+                if task.kind == "shutdown":
+                    self._finalize_all_sessions()
+                    self._queue_event("shutdown", 0, "", "")
+                    return
+                if task.kind == "start":
+                    self._process_start(task)
+                elif task.kind == "stop":
+                    self._process_stop(task)
+                elif task.kind == "audio":
+                    self._process_audio(task)
+            except Exception as error:
+                console.log(f"音声認識ワーカーで予期しないエラーが発生しました: {error}")
+            finally:
+                self.processing_queue.task_done()
+
+    def _process_start(self, task: RecognitionTask) -> None:
+        if task.user_id is None:
+            return
+
+        with self.state_lock:
+            current_state = self._get_or_create_state(task.user_id, task.display_name)
+            current_state.display_name = task.display_name
+            if current_state.start_announced:
+                return
+            current_state.start_announced = True
+
+        self._queue_event("start", task.user_id, task.display_name, "")
+
+    def _process_stop(self, task: RecognitionTask) -> None:
+        if task.user_id is None:
+            return
+
+        final_text = self._finalize_user_session(task.user_id)
+        self._queue_event("finalize", task.user_id, task.display_name, final_text)
+
+    def _process_audio(self, task: RecognitionTask) -> None:
+        if task.user_id is None:
+            self._remember_pending_audio(task.ssrc, task.pcm, task.received_at)
+            return
+
         should_queue_start = False
         display_text = ""
         with self.state_lock:
-            pending_audio = self._take_pending_audio(ssrc, now)
-            current_state = self._get_or_create_state(user.id, user.display_name)
-            current_state.display_name = user.display_name
-            mono_16khz_pcm = current_state.pcm_converter.convert(pcm)
+            pending_audio = self._take_pending_audio(task.ssrc, task.received_at)
+            current_state = self._get_or_create_state(task.user_id, task.display_name)
+            current_state.display_name = task.display_name
+            if not current_state.start_announced:
+                current_state.start_announced = True
+                should_queue_start = True
+
+            mono_16khz_pcm, current_state.resample_state = (
+                convert_pcm_48khz_stereo_to_16khz_mono(
+                    pending_audio + task.pcm,
+                    current_state.resample_state,
+                )
+            )
             if not mono_16khz_pcm:
+                if should_queue_start:
+                    self._queue_event("start", task.user_id, task.display_name, "")
                 return
 
-            if current_state.recognizer.AcceptWaveform(pending_audio + mono_16khz_pcm):
+            if current_state.recognizer.AcceptWaveform(mono_16khz_pcm):
                 result = json.loads(current_state.recognizer.Result())
                 text = normalize_transcript(result.get("text", ""))
                 if not text:
                     if should_queue_start:
-                        self._queue_event("start", user.id, user.display_name, "")
+                        self._queue_event("start", task.user_id, task.display_name, "")
                     return
 
                 current_state.committed_texts.append(text)
@@ -79,55 +197,25 @@ class VoskSink(AudioSink):
                 partial_result = json.loads(current_state.recognizer.PartialResult())
                 partial_text = normalize_transcript(partial_result.get("partial", ""))
                 if not partial_text:
+                    if should_queue_start:
+                        self._queue_event("start", task.user_id, task.display_name, "")
                     return
 
                 current_state.partial_text = partial_text
                 if (
-                    now - current_state.last_partial_sent_at
+                    task.received_at - current_state.last_partial_sent_at
                     >= self.partial_update_interval
                 ):
-                    current_state.last_partial_sent_at = now
+                    current_state.last_partial_sent_at = task.received_at
                     display_text = join_transcript_parts(
                         [*current_state.committed_texts, current_state.partial_text]
                     )
-                    should_send_partial = bool(display_text)
-
-                if not should_send_partial:
-                    if should_queue_start:
-                        self._queue_event("start", user.id, user.display_name, "")
-                    return
 
         if should_queue_start:
-            self._queue_event("start", user.id, user.display_name, "")
+            self._queue_event("start", task.user_id, task.display_name, "")
 
-        if display_text and not should_send_partial:
-            self._queue_event("update", user.id, user.display_name, display_text)
-            return
-
-        if should_send_partial:
-            self._queue_event("update", user.id, user.display_name, display_text)
-
-    @AudioSink.listener()
-    def on_voice_member_speaking_start(self, member: discord.Member) -> None:
-        if self.shutdown_requested.is_set() or member.bot:
-            return
-
-        with self.state_lock:
-            current_state = self._get_or_create_state(member.id, member.display_name)
-            current_state.display_name = member.display_name
-            if current_state.start_announced:
-                return
-            current_state.start_announced = True
-
-        self._queue_event("start", member.id, member.display_name, "")
-
-    @AudioSink.listener()
-    def on_voice_member_speaking_stop(self, member: discord.Member) -> None:
-        if self.shutdown_requested.is_set() or member.bot:
-            return
-
-        final_text = self._finalize_user_session(member.id)
-        self._queue_event("finalize", member.id, member.display_name, final_text)
+        if display_text:
+            self._queue_event("update", task.user_id, task.display_name, display_text)
 
     async def _event_worker(self) -> None:
         while True:
@@ -135,7 +223,10 @@ class VoskSink(AudioSink):
             try:
                 if event.kind == "shutdown":
                     return
-                if self.shutdown_requested.is_set() and event.kind != "finalize":
+                if self.shutdown_requested.is_set() and event.kind not in {
+                    "finalize",
+                    "shutdown",
+                }:
                     continue
                 if event.kind == "start":
                     await self._handle_start(event)
@@ -231,7 +322,7 @@ class VoskSink(AudioSink):
         display_name: str,
         text: str,
     ) -> None:
-        if self.shutdown_requested.is_set() and kind != "finalize":
+        if self.shutdown_requested.is_set() and kind not in {"finalize", "shutdown"}:
             return
 
         event = SinkEvent(
@@ -246,6 +337,12 @@ class VoskSink(AudioSink):
             console.log(
                 "イベントループ停止後のため、文字起こしイベントを破棄しました。"
             )
+
+    def _enqueue_recognition_task(self, task: RecognitionTask) -> None:
+        if self.shutdown_requested.is_set() and task.kind != "shutdown":
+            return
+
+        self.processing_queue.put_nowait(task)
 
     def _remember_pending_audio(
         self,
@@ -291,7 +388,13 @@ class VoskSink(AudioSink):
     def request_stop(self) -> None:
         self._begin_shutdown()
 
+    async def wait_for_idle(self) -> None:
+        await asyncio.to_thread(self.processing_queue.join)
+        await self.event_queue.join()
+
     async def wait_closed(self) -> None:
+        await asyncio.to_thread(self.processing_queue.join)
+        await asyncio.to_thread(self.processor_thread.join)
         await asyncio.shield(self.worker_task)
 
     def cleanup(self) -> None:
@@ -302,7 +405,9 @@ class VoskSink(AudioSink):
             return
 
         self.shutdown_requested.set()
-        pending_events: list[SinkEvent] = []
+        self._enqueue_recognition_task(RecognitionTask(kind="shutdown"))
+
+    def _finalize_all_sessions(self) -> None:
         with self.state_lock:
             pending_speakers = [
                 (user_id, current_state.display_name)
@@ -312,23 +417,4 @@ class VoskSink(AudioSink):
 
         for user_id, display_name in pending_speakers:
             final_text = self._finalize_user_session(user_id)
-            pending_events.append(
-                SinkEvent(
-                    kind="finalize",
-                    user_id=user_id,
-                    display_name=display_name,
-                    text=final_text,
-                )
-            )
-
-        def enqueue_cleanup() -> None:
-            for event in pending_events:
-                self.event_queue.put_nowait(event)
-            self.event_queue.put_nowait(SinkEvent("shutdown", 0, "", ""))
-
-        try:
-            self.loop.call_soon_threadsafe(enqueue_cleanup)
-        except RuntimeError:
-            console.log(
-                "イベントループ停止後のため、文字起こしワーカーを終了できませんでした。"
-            )
+            self._queue_event("finalize", user_id, display_name, final_text)

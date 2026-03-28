@@ -20,13 +20,22 @@ log = logging.getLogger(__name__)
 
 PATCH_FLAG = "__mituke_packet_decoder_guard_installed__"
 DAVE_PASSTHROUGH_FLAG = "__mituke_dave_passthrough_enabled__"
+FLUSH_WARNING_FILTER_FLAG = "__mituke_decoder_flush_warning_filter__"
 OPUS_AUDIO_PAYLOAD_TYPE = 120
 WARNING_INTERVAL_SECONDS = 5.0
+WARNING_INTERVALS_BY_KEY = {
+    "decoder_flush_loss": 30.0,
+    "missing_member_for_dave": 30.0,
+}
+SSRC_MAPPING_WAIT_SECONDS = 0.1
+SSRC_MAPPING_POLL_SECONDS = 0.01
 FALLBACK_PCM = b"\x00\x00" * Decoder.SAMPLES_PER_FRAME * Decoder.CHANNELS
+DECODER_FLUSH_WARNING_TEXT = "packets were lost being flushed in decoder"
 _last_warning_at: dict[str, float] = {}
 
 
 def install_packet_decoder_guard(console: Console) -> None:
+    _install_decoder_flush_warning_filter(console)
     if getattr(PacketDecoder, PATCH_FLAG, False):
         return
 
@@ -62,6 +71,27 @@ def install_packet_decoder_guard(console: Console) -> None:
 
         PacketDecoder._process_packet = safe_process_packet  # type: ignore[method-assign]
     setattr(PacketDecoder, PATCH_FLAG, True)
+
+
+def _install_decoder_flush_warning_filter(console: Console) -> None:
+    logger = logging.getLogger("discord.ext.voice_recv.opus")
+    if any(getattr(flt, FLUSH_WARNING_FILTER_FLAG, False) for flt in logger.filters):
+        return
+
+    class DecoderFlushWarningFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            if DECODER_FLUSH_WARNING_TEXT not in record.getMessage():
+                return True
+
+            if _should_log_warning("decoder_flush_loss"):
+                console.log(
+                    "VC 受信で一部の音声パケット欠落を検知しました。受信は継続します。"
+                )
+            return False
+
+    warning_filter = DecoderFlushWarningFilter()
+    setattr(warning_filter, FLUSH_WARNING_FILTER_FLAG, True)
+    logger.addFilter(warning_filter)
 
 
 def _decode_missing_pcm(packet_decoder: PacketDecoder) -> bytes:
@@ -106,12 +136,25 @@ def _resolve_member(decoder: PacketDecoder) -> Any:
     if member is not None:
         return member
 
-    try:
-        decoder._cached_id = decoder.sink.voice_client._get_id_from_ssrc(decoder.ssrc)  # type: ignore[attr-defined]
-    except Exception:
+    voice_client = getattr(decoder.sink, "voice_client", None)
+    if voice_client is None:
         return None
 
-    return decoder._get_cached_member()
+    deadline = time.monotonic() + SSRC_MAPPING_WAIT_SECONDS
+    while True:
+        try:
+            decoder._cached_id = voice_client._get_id_from_ssrc(decoder.ssrc)  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
+        member = decoder._get_cached_member()
+        if member is not None:
+            return member
+
+        if time.monotonic() >= deadline:
+            return None
+
+        time.sleep(SSRC_MAPPING_POLL_SECONDS)
 
 
 def _is_non_audio_packet(packet: Any) -> bool:
@@ -172,7 +215,8 @@ def _remember_packet_position(decoder: PacketDecoder, packet: Any) -> None:
 def _should_log_warning(key: str) -> bool:
     now = time.monotonic()
     last_warning_at = _last_warning_at.get(key, 0.0)
-    if now - last_warning_at < WARNING_INTERVAL_SECONDS:
+    warning_interval = WARNING_INTERVALS_BY_KEY.get(key, WARNING_INTERVAL_SECONDS)
+    if now - last_warning_at < warning_interval:
         return False
 
     _last_warning_at[key] = now

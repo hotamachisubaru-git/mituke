@@ -72,7 +72,7 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         )
         self.audio_patcher = patch(
             "mituke.transcription.sink.convert_pcm_48khz_stereo_to_16khz_mono",
-            side_effect=lambda pcm: pcm,
+            side_effect=lambda pcm, state=None: (pcm, state),
         )
 
         self.model_patcher.start()
@@ -136,8 +136,7 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=1, display_name="Alice", bot=False)
         sink.write(user, SimpleNamespace(pcm=b"tail", packet=SimpleNamespace(ssrc=42)))
 
-        await asyncio.sleep(0)
-        await asyncio.wait_for(sink.event_queue.join(), 1)
+        await asyncio.wait_for(sink.wait_for_idle(), 1)
 
         state = sink.recognition_states[1]
         recognizer = state.recognizer
@@ -166,8 +165,7 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         sink.on_voice_member_speaking_start(user)
         sink.write(user, SimpleNamespace(pcm=b"voice", packet=SimpleNamespace(ssrc=42)))
 
-        await asyncio.sleep(0)
-        await asyncio.wait_for(sink.event_queue.join(), 1)
+        await asyncio.wait_for(sink.wait_for_idle(), 1)
 
         self.assertEqual(len(self.text_channel.messages), 1)
         self.assertEqual(self.text_channel.messages[0].content, "Alice: あとから")

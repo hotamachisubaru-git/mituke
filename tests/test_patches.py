@@ -91,6 +91,33 @@ class VoiceRecvPatchTests(unittest.TestCase):
         dave_session.decrypt.assert_not_called()
         console.log.assert_called_once()
 
+    def test_resolve_member_waits_for_late_ssrc_mapping(self) -> None:
+        member = SimpleNamespace(id=123)
+        id_results = iter([None, None, 123])
+
+        def get_cached_member():
+            return member if decoder._cached_id == 123 else None
+
+        decoder = SimpleNamespace(
+            sink=SimpleNamespace(
+                voice_client=SimpleNamespace(
+                    _get_id_from_ssrc=lambda _ssrc: next(id_results)
+                )
+            ),
+            ssrc=42,
+            _cached_id=None,
+        )
+        decoder._get_cached_member = get_cached_member
+
+        with unittest.mock.patch(
+            "mituke.patches.voice_recv.time.monotonic",
+            side_effect=[0.0, 0.01, 0.02, 0.03],
+        ), unittest.mock.patch("mituke.patches.voice_recv.time.sleep"):
+            result = voice_recv_patch._resolve_member(decoder)
+
+        self.assertIs(result, member)
+        self.assertEqual(decoder._cached_id, 123)
+
     def test_remember_packet_position_updates_decoder_state(self) -> None:
         decoder = SimpleNamespace(_last_seq=-1, _last_ts=-1)
         packet = SimpleNamespace(sequence=77, timestamp=8800)
