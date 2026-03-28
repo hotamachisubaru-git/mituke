@@ -54,18 +54,6 @@ class VoskSink(AudioSink):
         if not pcm:
             return
 
-        mono_16khz_pcm = convert_pcm_48khz_stereo_to_16khz_mono(pcm)
-        if not mono_16khz_pcm:
-            return
-
-        packet = getattr(data, "packet", None)
-        ssrc = getattr(packet, "ssrc", None)
-        now = time.monotonic()
-
-        if user is None:
-            self._remember_pending_audio(ssrc, mono_16khz_pcm, now)
-            return
-
         should_send_partial = False
         should_queue_start = False
         display_text = ""
@@ -73,9 +61,14 @@ class VoskSink(AudioSink):
             pending_audio = self._take_pending_audio(ssrc, now)
             current_state = self._get_or_create_state(user.id, user.display_name)
             current_state.display_name = user.display_name
-            if not current_state.start_announced:
-                current_state.start_announced = True
-                should_queue_start = True
+            mono_16khz_pcm, current_state.resample_state = (
+                convert_pcm_48khz_stereo_to_16khz_mono(
+                    pcm,
+                    current_state.resample_state,
+                )
+            )
+            if not mono_16khz_pcm:
+                return
 
             if current_state.recognizer.AcceptWaveform(pending_audio + mono_16khz_pcm):
                 result = json.loads(current_state.recognizer.Result())

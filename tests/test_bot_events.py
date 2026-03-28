@@ -26,6 +26,8 @@ class FakeVoiceRecvClient:
         self.sink = sink
         self.stop_called = False
         self.disconnect_calls: list[bool] = []
+        self._ssrc_to_id: dict[int, int] = {123: 1}
+        self._id_to_ssrc: dict[int, int] = {1: 123}
 
     def is_listening(self) -> bool:
         return self._listening
@@ -81,6 +83,8 @@ class VoiceStateUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(voice_client.stop_called)
         self.assertTrue(managed_sink.request_stop_called)
         self.assertTrue(managed_sink.wait_closed_called)
+        self.assertEqual(voice_client._ssrc_to_id, {})
+        self.assertEqual(voice_client._id_to_ssrc, {})
         self.assertEqual(voice_client.disconnect_calls, [True])
         console.log.assert_called_once_with("VC General が空になったため退出しました。")
 

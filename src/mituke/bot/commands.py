@@ -39,8 +39,7 @@ async def start_listening(
 
     assert isinstance(voice_client, VoiceRecvClient)
 
-    if voice_client.is_listening():
-        await stop_receiving(voice_client)
+    await stop_receiving(voice_client)
 
     sink = VoskSink(
         text_channel=ctx.channel,

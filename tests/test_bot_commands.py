@@ -39,6 +39,8 @@ class FakeVoiceRecvClient:
         self.disconnect_calls: list[bool] = []
         self.move_calls: list[object] = []
         self.listen_calls: list[tuple[object, object]] = []
+        self._ssrc_to_id: dict[int, int] = {123: 1}
+        self._id_to_ssrc: dict[int, int] = {1: 123}
 
     def is_listening(self) -> bool:
         return self._listening
@@ -212,6 +214,8 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(voice_client.stop_called)
         self.assertTrue(previous_sink.request_stop_called)
         self.assertTrue(previous_sink.wait_closed_called)
+        self.assertEqual(voice_client._ssrc_to_id, {})
+        self.assertEqual(voice_client._id_to_ssrc, {})
         self.assertEqual(voice_client.move_calls, [target_channel])
         self.assertEqual(target_channel.connect_calls, [])
         self.assertEqual(len(voice_client.listen_calls), 1)
@@ -219,6 +223,27 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
             ctx.sent_messages,
             ["VC `Meeting` へ参加しました。 これからこのチャンネルで文字起こしを送ります。"],
         )
+
+    async def test_clears_stale_source_mapping_before_starting(self) -> None:
+        settings = Settings("token", Path("model"), None)
+        target_channel = FakeVoiceChannel("Meeting")
+        voice_client = FakeVoiceRecvClient(channel=target_channel, listening=False)
+        ctx = FakeContext(
+            guild=FakeGuild(voice_client=voice_client),
+            author=FakeMember(voice=SimpleNamespace(channel=target_channel)),
+            channel=FakeTextChannel(),
+        )
+
+        with (
+            patch("mituke.bot.commands.discord.Member", FakeMember),
+            patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
+            patch("mituke.bot.commands.VoskSink", FakeSink),
+            patch("mituke.bot.commands.asyncio.get_running_loop", return_value=object()),
+        ):
+            await start_listening(ctx, settings, Mock())
+
+        self.assertEqual(voice_client._ssrc_to_id, {})
+        self.assertEqual(voice_client._id_to_ssrc, {})
 
 
 class StopListeningTests(unittest.IsolatedAsyncioTestCase):
@@ -261,6 +286,8 @@ class StopListeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(voice_client.stop_called)
         self.assertTrue(managed_sink.request_stop_called)
         self.assertTrue(managed_sink.wait_closed_called)
+        self.assertEqual(voice_client._ssrc_to_id, {})
+        self.assertEqual(voice_client._id_to_ssrc, {})
         self.assertEqual(voice_client.disconnect_calls, [True])
         self.assertEqual(ctx.sent_messages, ["ボイスチャンネルから退出しました。"])
 
