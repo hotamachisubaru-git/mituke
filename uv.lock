@@ -529,6 +529,7 @@ name = "mituke"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "davey" },
     { name = "discord-ext-voice-recv" },
     { name = "discord-py" },
     { name = "pynacl" },
@@ -539,6 +540,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "davey", specifier = ">=0.1.4" },
     { name = "discord-ext-voice-recv", specifier = ">=0.5.2a179" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "pynacl", specifier = "==1.5.0" },
