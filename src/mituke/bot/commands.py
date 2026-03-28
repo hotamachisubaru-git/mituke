@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 
+from mituke.bot.voice import stop_receiving
 from mituke.config import Settings
 from mituke.transcription.sink import VoskSink
 
@@ -38,8 +39,7 @@ async def start_listening(
 
     assert isinstance(voice_client, VoiceRecvClient)
 
-    if voice_client.is_listening():
-        voice_client.stop_listening()
+    await stop_receiving(voice_client)
 
     sink = VoskSink(
         text_channel=ctx.channel,
@@ -64,8 +64,8 @@ async def stop_listening(ctx: commands.Context) -> None:
         await ctx.send("今はどのボイスチャンネルにも参加していません。")
         return
 
-    if isinstance(voice_client, VoiceRecvClient) and voice_client.is_listening():
-        voice_client.stop_listening()
+    if isinstance(voice_client, VoiceRecvClient):
+        await stop_receiving(voice_client)
 
     await voice_client.disconnect(force=True)
     await ctx.send("ボイスチャンネルから退出しました。")

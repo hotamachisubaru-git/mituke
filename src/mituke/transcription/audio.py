@@ -49,6 +49,10 @@ class DiscordPcmConverter:
 
         return audioop.tomono(pcm, PCM_SAMPLE_WIDTH_BYTES, 0.5, 0.5)
 
+try:
+    import audioop
+except ModuleNotFoundError:
+    import audioop_lts as audioop
 
 def convert_pcm_48khz_stereo_to_16khz_mono(pcm: bytes) -> bytes:
     return DiscordPcmConverter().convert(pcm)

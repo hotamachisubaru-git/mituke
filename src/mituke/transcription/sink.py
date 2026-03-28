@@ -17,6 +17,8 @@ from mituke.transcription.state import MessageState, RecognitionState, SinkEvent
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
 
 console = Console()
+PENDING_AUDIO_RETENTION_SECONDS = 1.0
+PENDING_AUDIO_MAX_BYTES = 16000 * 2
 
 
 class VoskSink(AudioSink):
@@ -34,7 +36,9 @@ class VoskSink(AudioSink):
         self.model = load_vosk_model(str(model_path.resolve()))
         self.recognition_states: dict[int, RecognitionState] = {}
         self.message_states: dict[int, MessageState] = {}
+        self.pending_audio_by_ssrc: dict[int, tuple[float, bytearray]] = {}
         self.state_lock = threading.Lock()
+        self.shutdown_requested = threading.Event()
         self.event_queue: asyncio.Queue[SinkEvent] = asyncio.Queue()
         self.worker_task = loop.create_task(self._event_worker())
 
@@ -42,7 +46,7 @@ class VoskSink(AudioSink):
         return False
 
     def write(self, user: discord.User | discord.Member | None, data: Any) -> None:
-        if user is None or user.bot:
+        if self.shutdown_requested.is_set() or (user is not None and user.bot):
             return
 
         pcm = getattr(data, "pcm", None)
@@ -50,19 +54,22 @@ class VoskSink(AudioSink):
             return
 
         should_send_partial = False
+        should_queue_start = False
         display_text = ""
-        now = time.monotonic()
         with self.state_lock:
+            pending_audio = self._take_pending_audio(ssrc, now)
             current_state = self._get_or_create_state(user.id, user.display_name)
             current_state.display_name = user.display_name
             mono_16khz_pcm = current_state.pcm_converter.convert(pcm)
             if not mono_16khz_pcm:
                 return
 
-            if current_state.recognizer.AcceptWaveform(mono_16khz_pcm):
+            if current_state.recognizer.AcceptWaveform(pending_audio + mono_16khz_pcm):
                 result = json.loads(current_state.recognizer.Result())
                 text = normalize_transcript(result.get("text", ""))
                 if not text:
+                    if should_queue_start:
+                        self._queue_event("start", user.id, user.display_name, "")
                     return
 
                 current_state.committed_texts.append(text)
@@ -86,7 +93,12 @@ class VoskSink(AudioSink):
                     should_send_partial = bool(display_text)
 
                 if not should_send_partial:
+                    if should_queue_start:
+                        self._queue_event("start", user.id, user.display_name, "")
                     return
+
+        if should_queue_start:
+            self._queue_event("start", user.id, user.display_name, "")
 
         if display_text and not should_send_partial:
             self._queue_event("update", user.id, user.display_name, display_text)
@@ -97,14 +109,21 @@ class VoskSink(AudioSink):
 
     @AudioSink.listener()
     def on_voice_member_speaking_start(self, member: discord.Member) -> None:
-        if member.bot:
+        if self.shutdown_requested.is_set() or member.bot:
             return
+
+        with self.state_lock:
+            current_state = self._get_or_create_state(member.id, member.display_name)
+            current_state.display_name = member.display_name
+            if current_state.start_announced:
+                return
+            current_state.start_announced = True
 
         self._queue_event("start", member.id, member.display_name, "")
 
     @AudioSink.listener()
     def on_voice_member_speaking_stop(self, member: discord.Member) -> None:
-        if member.bot:
+        if self.shutdown_requested.is_set() or member.bot:
             return
 
         final_text = self._finalize_user_session(member.id)
@@ -116,6 +135,8 @@ class VoskSink(AudioSink):
             try:
                 if event.kind == "shutdown":
                     return
+                if self.shutdown_requested.is_set() and event.kind != "finalize":
+                    continue
                 if event.kind == "start":
                     await self._handle_start(event)
                 elif event.kind == "update":
@@ -210,21 +231,82 @@ class VoskSink(AudioSink):
         display_name: str,
         text: str,
     ) -> None:
+        if self.shutdown_requested.is_set() and kind != "finalize":
+            return
+
         event = SinkEvent(
             kind=kind,
             user_id=user_id,
             display_name=display_name,
             text=text,
         )
-        self.loop.call_soon_threadsafe(self.event_queue.put_nowait, event)
+        try:
+            self.loop.call_soon_threadsafe(self.event_queue.put_nowait, event)
+        except RuntimeError:
+            console.log("イベントループ停止後のため、文字起こしイベントを破棄しました。")
+
+    def _remember_pending_audio(
+        self,
+        ssrc: int | None,
+        pcm: bytes,
+        now: float,
+    ) -> None:
+        if ssrc is None:
+            return
+
+        with self.state_lock:
+            self._discard_stale_pending_audio(now)
+            _, buffer = self.pending_audio_by_ssrc.get(ssrc, (now, bytearray()))
+            buffer.extend(pcm)
+            if len(buffer) > PENDING_AUDIO_MAX_BYTES:
+                del buffer[:-PENDING_AUDIO_MAX_BYTES]
+            self.pending_audio_by_ssrc[ssrc] = (now, buffer)
+
+    def _take_pending_audio(self, ssrc: int | None, now: float) -> bytes:
+        self._discard_stale_pending_audio(now)
+        if ssrc is None:
+            return b""
+
+        pending_audio = self.pending_audio_by_ssrc.pop(ssrc, None)
+        if pending_audio is None:
+            return b""
+
+        updated_at, buffer = pending_audio
+        if now - updated_at > PENDING_AUDIO_RETENTION_SECONDS:
+            return b""
+
+        return bytes(buffer)
+
+    def _discard_stale_pending_audio(self, now: float) -> None:
+        stale_ssrcs = [
+            ssrc
+            for ssrc, (updated_at, _) in self.pending_audio_by_ssrc.items()
+            if now - updated_at > PENDING_AUDIO_RETENTION_SECONDS
+        ]
+        for ssrc in stale_ssrcs:
+            self.pending_audio_by_ssrc.pop(ssrc, None)
+
+    def request_stop(self) -> None:
+        self._begin_shutdown()
+
+    async def wait_closed(self) -> None:
+        await asyncio.shield(self.worker_task)
 
     def cleanup(self) -> None:
+        self._begin_shutdown()
+
+    def _begin_shutdown(self) -> None:
+        if self.shutdown_requested.is_set():
+            return
+
+        self.shutdown_requested.set()
         pending_events: list[SinkEvent] = []
         with self.state_lock:
             pending_speakers = [
                 (user_id, current_state.display_name)
                 for user_id, current_state in self.recognition_states.items()
             ]
+            self.pending_audio_by_ssrc.clear()
 
         for user_id, display_name in pending_speakers:
             final_text = self._finalize_user_session(user_id)
@@ -242,4 +324,7 @@ class VoskSink(AudioSink):
                 self.event_queue.put_nowait(event)
             self.event_queue.put_nowait(SinkEvent("shutdown", 0, "", ""))
 
-        self.loop.call_soon_threadsafe(enqueue_cleanup)
+        try:
+            self.loop.call_soon_threadsafe(enqueue_cleanup)
+        except RuntimeError:
+            console.log("イベントループ停止後のため、文字起こしワーカーを終了できませんでした。")

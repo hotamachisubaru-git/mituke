@@ -32,7 +32,10 @@ class NormalizeTranscriptTests(unittest.TestCase):
 
 class ConvertPcmTests(unittest.TestCase):
     def test_returns_empty_bytes_for_empty_pcm(self) -> None:
-        self.assertEqual(convert_pcm_48khz_stereo_to_16khz_mono(b""), b"")
+        self.assertEqual(
+            convert_pcm_48khz_stereo_to_16khz_mono(b""),
+            (b"", None),
+        )
 
     def test_converts_48khz_stereo_pcm_to_16khz_mono(self) -> None:
         stereo_samples = array(
@@ -49,9 +52,35 @@ class ConvertPcmTests(unittest.TestCase):
 
         expected = array("h", [6000]).tobytes()
 
-        self.assertEqual(
-            convert_pcm_48khz_stereo_to_16khz_mono(stereo_samples.tobytes()),
-            expected,
+    def test_keeps_resample_state_across_chunks(self) -> None:
+        first_chunk = array(
+            "h",
+            [
+                3000,
+                9000,
+                6000,
+                12000,
+                9000,
+                15000,
+            ],
+        ).tobytes()
+        second_chunk = array(
+            "h",
+            [
+                12000,
+                18000,
+                15000,
+                21000,
+                18000,
+                24000,
+            ],
+        ).tobytes()
+
+        combined, _ = convert_pcm_48khz_stereo_to_16khz_mono(first_chunk + second_chunk)
+        converted_first, state = convert_pcm_48khz_stereo_to_16khz_mono(first_chunk)
+        converted_second, next_state = convert_pcm_48khz_stereo_to_16khz_mono(
+            second_chunk,
+            state,
         )
 
     def test_stream_converter_keeps_resampling_state_across_chunks(self) -> None:
