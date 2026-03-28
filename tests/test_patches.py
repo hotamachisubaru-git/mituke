@@ -109,10 +109,13 @@ class VoiceRecvPatchTests(unittest.TestCase):
         )
         decoder._get_cached_member = get_cached_member
 
-        with unittest.mock.patch(
-            "mituke.patches.voice_recv.time.monotonic",
-            side_effect=[0.0, 0.01, 0.02, 0.03],
-        ), unittest.mock.patch("mituke.patches.voice_recv.time.sleep"):
+        with (
+            unittest.mock.patch(
+                "mituke.patches.voice_recv.time.monotonic",
+                side_effect=[0.0, 0.01, 0.02, 0.03],
+            ),
+            unittest.mock.patch("mituke.patches.voice_recv.time.sleep"),
+        ):
             result = voice_recv_patch._resolve_member(decoder)
 
         self.assertIs(result, member)

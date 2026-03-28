@@ -132,7 +132,9 @@ class VoskSink(AudioSink):
                 elif task.kind == "audio":
                     self._process_audio(task)
             except Exception as error:
-                console.log(f"音声認識ワーカーで予期しないエラーが発生しました: {error}")
+                console.log(
+                    f"音声認識ワーカーで予期しないエラーが発生しました: {error}"
+                )
             finally:
                 self.processing_queue.task_done()
 
