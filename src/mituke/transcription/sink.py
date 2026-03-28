@@ -18,6 +18,7 @@ from vosk import KaldiRecognizer
 from mituke.transcription.audio import (
     PCM_SAMPLE_WIDTH_BYTES,
     convert_pcm_48khz_stereo_to_16khz_mono,
+    trim_leading_silence,
 )
 from mituke.transcription.model import load_vosk_model
 from mituke.transcription.state import MessageState, RecognitionState, SinkEvent
@@ -28,6 +29,7 @@ PENDING_AUDIO_RETENTION_SECONDS = 1.0
 PENDING_AUDIO_MAX_BYTES = (
     Decoder.SAMPLING_RATE * Decoder.CHANNELS * PCM_SAMPLE_WIDTH_BYTES
 )
+SPEECH_STOP_GRACE_SECONDS = 0.8
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class RecognitionTask:
     pcm: bytes = b""
     ssrc: int | None = None
     received_at: float = 0.0
+    token: int = 0
 
 
 class VoskSink(AudioSink):
@@ -47,11 +50,13 @@ class VoskSink(AudioSink):
         model_path: Path,
         loop: asyncio.AbstractEventLoop,
         partial_update_interval: float = 1.0,
+        speech_stop_grace_period: float = SPEECH_STOP_GRACE_SECONDS,
     ) -> None:
         super().__init__()
         self.text_channel = text_channel
         self.loop = loop
         self.partial_update_interval = partial_update_interval
+        self.speech_stop_grace_period = speech_stop_grace_period
         self.model = load_vosk_model(str(model_path.resolve()))
         self.recognition_states: dict[int, RecognitionState] = {}
         self.message_states: dict[int, MessageState] = {}
@@ -131,6 +136,8 @@ class VoskSink(AudioSink):
                     self._process_stop(task)
                 elif task.kind == "audio":
                     self._process_audio(task)
+                elif task.kind == "stop_timeout":
+                    self._process_stop_timeout(task)
             except Exception as error:
                 console.log(
                     f"音声認識ワーカーで予期しないエラーが発生しました: {error}"
@@ -145,18 +152,30 @@ class VoskSink(AudioSink):
         with self.state_lock:
             current_state = self._get_or_create_state(task.user_id, task.display_name)
             current_state.display_name = task.display_name
-            if current_state.start_announced:
-                return
-            current_state.start_announced = True
-
-        self._queue_event("start", task.user_id, task.display_name, "")
+            current_state.activity_token += 1
 
     def _process_stop(self, task: RecognitionTask) -> None:
         if task.user_id is None:
             return
 
-        final_text = self._finalize_user_session(task.user_id)
-        self._queue_event("finalize", task.user_id, task.display_name, final_text)
+        with self.state_lock:
+            current_state = self.recognition_states.get(task.user_id)
+            if current_state is None:
+                return
+
+            current_state.display_name = task.display_name or current_state.display_name
+            if (
+                not current_state.start_announced
+                and not current_state.committed_texts
+                and not current_state.partial_text
+            ):
+                self.recognition_states.pop(task.user_id, None)
+                return
+
+            token = current_state.activity_token
+            display_name = current_state.display_name
+
+        self._schedule_stop_timeout(task.user_id, display_name, token)
 
     def _process_audio(self, task: RecognitionTask) -> None:
         if task.user_id is None:
@@ -169,9 +188,7 @@ class VoskSink(AudioSink):
             pending_audio = self._take_pending_audio(task.ssrc, task.received_at)
             current_state = self._get_or_create_state(task.user_id, task.display_name)
             current_state.display_name = task.display_name
-            if not current_state.start_announced:
-                current_state.start_announced = True
-                should_queue_start = True
+            current_state.activity_token += 1
 
             mono_16khz_pcm, current_state.resample_state = (
                 convert_pcm_48khz_stereo_to_16khz_mono(
@@ -180,9 +197,15 @@ class VoskSink(AudioSink):
                 )
             )
             if not mono_16khz_pcm:
-                if should_queue_start:
-                    self._queue_event("start", task.user_id, task.display_name, "")
                 return
+
+            if not current_state.start_announced:
+                mono_16khz_pcm = trim_leading_silence(mono_16khz_pcm)
+                if not mono_16khz_pcm:
+                    return
+
+                current_state.start_announced = True
+                should_queue_start = True
 
             if current_state.recognizer.AcceptWaveform(mono_16khz_pcm):
                 result = json.loads(current_state.recognizer.Result())
@@ -218,6 +241,20 @@ class VoskSink(AudioSink):
 
         if display_text:
             self._queue_event("update", task.user_id, task.display_name, display_text)
+
+    def _process_stop_timeout(self, task: RecognitionTask) -> None:
+        if task.user_id is None:
+            return
+
+        with self.state_lock:
+            current_state = self.recognition_states.get(task.user_id)
+            if current_state is None or current_state.activity_token != task.token:
+                return
+
+            display_name = current_state.display_name
+
+        final_text = self._finalize_user_session(task.user_id)
+        self._queue_event("finalize", task.user_id, display_name, final_text)
 
     async def _event_worker(self) -> None:
         while True:
@@ -345,6 +382,29 @@ class VoskSink(AudioSink):
             return
 
         self.processing_queue.put_nowait(task)
+
+    def _schedule_stop_timeout(
+        self,
+        user_id: int,
+        display_name: str,
+        token: int,
+    ) -> None:
+        try:
+            self.loop.call_soon_threadsafe(
+                self.loop.call_later,
+                self.speech_stop_grace_period,
+                self._enqueue_recognition_task,
+                RecognitionTask(
+                    kind="stop_timeout",
+                    user_id=user_id,
+                    display_name=display_name,
+                    token=token,
+                ),
+            )
+        except RuntimeError:
+            console.log(
+                "イベントループ停止後のため、発話終了待ちタイマーを破棄しました。"
+            )
 
     def _remember_pending_audio(
         self,

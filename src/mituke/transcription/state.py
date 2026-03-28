@@ -16,6 +16,7 @@ class RecognitionState:
     last_partial_sent_at: float = 0.0
     resample_state: Any = None
     start_announced: bool = False
+    activity_token: int = 0
 
 
 @dataclass

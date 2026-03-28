@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from array import array
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -58,6 +59,10 @@ class FakeTextChannel:
 
 
 class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _make_pcm(sample: int, samples: int = 320) -> bytes:
+        return array("h", [sample] * samples).tobytes()
+
     async def asyncSetUp(self) -> None:
         self.text_channel = FakeTextChannel()
         self.loop = asyncio.get_running_loop()
@@ -131,17 +136,23 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
             loop=self.loop,
         )
 
-        sink.write(None, SimpleNamespace(pcm=b"lead", packet=SimpleNamespace(ssrc=42)))
+        lead_pcm = self._make_pcm(900)
+        tail_pcm = self._make_pcm(1400)
+
+        sink.write(None, SimpleNamespace(pcm=lead_pcm, packet=SimpleNamespace(ssrc=42)))
 
         user = SimpleNamespace(id=1, display_name="Alice", bot=False)
-        sink.write(user, SimpleNamespace(pcm=b"tail", packet=SimpleNamespace(ssrc=42)))
+        sink.write(
+            user,
+            SimpleNamespace(pcm=tail_pcm, packet=SimpleNamespace(ssrc=42)),
+        )
 
         await asyncio.wait_for(sink.wait_for_idle(), 1)
 
         state = sink.recognition_states[1]
         recognizer = state.recognizer
 
-        self.assertEqual(recognizer.accept_calls, [b"leadtail"])
+        self.assertEqual(recognizer.accept_calls, [lead_pcm + tail_pcm])
         self.assertEqual(len(self.text_channel.messages), 1)
         self.assertEqual(self.text_channel.messages[0].content, "Alice: あとから")
         self.assertEqual(
@@ -163,7 +174,13 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
 
         user = SimpleNamespace(id=1, display_name="Alice", bot=False)
         sink.on_voice_member_speaking_start(user)
-        sink.write(user, SimpleNamespace(pcm=b"voice", packet=SimpleNamespace(ssrc=42)))
+        sink.write(
+            user,
+            SimpleNamespace(
+                pcm=self._make_pcm(1200),
+                packet=SimpleNamespace(ssrc=42),
+            ),
+        )
 
         await asyncio.wait_for(sink.wait_for_idle(), 1)
 
@@ -173,6 +190,60 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
             self.text_channel.messages[0].edits,
             ["Alice: あとから"],
         )
+
+        sink.request_stop()
+        await sink.wait_closed()
+
+    async def test_silent_audio_does_not_trigger_start_message(self) -> None:
+        sink = VoskSink(
+            text_channel=self.text_channel,
+            model_path=Path("."),
+            loop=self.loop,
+            speech_stop_grace_period=0.01,
+        )
+
+        user = SimpleNamespace(id=1, display_name="Alice", bot=False)
+        sink.on_voice_member_speaking_start(user)
+        sink.write(
+            user,
+            SimpleNamespace(pcm=self._make_pcm(0), packet=SimpleNamespace(ssrc=42)),
+        )
+        sink.on_voice_member_speaking_stop(user)
+
+        await asyncio.sleep(0.03)
+        await asyncio.wait_for(sink.wait_for_idle(), 1)
+
+        self.assertEqual(self.text_channel.messages, [])
+        self.assertEqual(sink.recognition_states, {})
+
+        sink.request_stop()
+        await sink.wait_closed()
+
+    async def test_brief_pause_keeps_same_transcription_session(self) -> None:
+        sink = VoskSink(
+            text_channel=self.text_channel,
+            model_path=Path("."),
+            loop=self.loop,
+            speech_stop_grace_period=0.05,
+        )
+
+        user = SimpleNamespace(id=1, display_name="Alice", bot=False)
+        audio = SimpleNamespace(pcm=self._make_pcm(1600), packet=SimpleNamespace(ssrc=42))
+
+        sink.write(user, audio)
+        await asyncio.wait_for(sink.wait_for_idle(), 1)
+
+        sink.on_voice_member_speaking_stop(user)
+        await asyncio.sleep(0.02)
+        sink.on_voice_member_speaking_start(user)
+        sink.write(user, audio)
+        await asyncio.wait_for(sink.wait_for_idle(), 1)
+        await asyncio.sleep(0.06)
+        await asyncio.wait_for(sink.wait_for_idle(), 1)
+
+        self.assertEqual(len(self.text_channel.messages), 1)
+        self.assertIn(1, sink.message_states)
+        self.assertIn(1, sink.recognition_states)
 
         sink.request_stop()
         await sink.wait_closed()
