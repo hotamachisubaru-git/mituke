@@ -5,6 +5,7 @@ from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 from rich.console import Console
 
+from mituke.bot import messages
 from mituke.bot.voice import stop_receiving
 
 
@@ -36,14 +37,14 @@ async def handle_voice_state_update(
     await stop_receiving(voice_client)
 
     await voice_client.disconnect(force=True)
-    console.log(f"VC {connected_channel.name} が空になったため退出しました。")
+    console.log(messages.voice_channel_emptied(connected_channel.name))
 
 
 async def handle_ready(bot: commands.Bot, console: Console) -> None:
     if bot.user is None:
         return
 
-    console.log(f"{bot.user} としてログインしました。")
+    console.log(messages.logged_in_as(bot.user))
 
 
 async def handle_command_error(
@@ -52,8 +53,8 @@ async def handle_command_error(
     console: Console,
 ) -> None:
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send("不明なコマンドです。`!help` で使い方を確認できます。")
+        await ctx.send(messages.UNKNOWN_COMMAND)
         return
 
-    console.log(f"コマンド実行中にエラーが発生しました: {error}")
-    await ctx.send("コマンドの実行中にエラーが発生しました。ログを確認してください。")
+    console.log(messages.command_error(error))
+    await ctx.send(messages.COMMAND_ERROR)

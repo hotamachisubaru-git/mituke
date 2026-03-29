@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 
+from mituke.bot import messages
 from mituke.bot.voice import stop_receiving
 from mituke.config import Settings
 from mituke.transcription.sink import VoskSink
@@ -17,12 +18,12 @@ async def start_listening(
     handle_listen_error,
 ) -> None:
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-        await ctx.send("このコマンドはサーバー内のテキストチャンネルで使ってください。")
+        await ctx.send(messages.SERVER_TEXT_CHANNEL_REQUIRED)
         return
 
     voice_state = ctx.author.voice
     if voice_state is None or voice_state.channel is None:
-        await ctx.send("先に参加したいボイスチャンネルへ入ってください。")
+        await ctx.send(messages.VOICE_CHANNEL_REQUIRED)
         return
 
     target_channel = voice_state.channel
@@ -48,33 +49,25 @@ async def start_listening(
     )
     voice_client.listen(sink, after=handle_listen_error)
 
-    await ctx.send(
-        f"VC `{target_channel.name}` へ参加しました。"
-        f" これからこのチャンネルで文字起こしを送ります。"
-    )
+    await ctx.send(messages.joined_voice_channel(target_channel.name))
 
 
 async def stop_listening(ctx: commands.Context) -> None:
     if ctx.guild is None:
-        await ctx.send("このコマンドはサーバー内で使ってください。")
+        await ctx.send(messages.SERVER_CONTEXT_REQUIRED)
         return
 
     voice_client = ctx.guild.voice_client
     if voice_client is None:
-        await ctx.send("今はどのボイスチャンネルにも参加していません。")
+        await ctx.send(messages.VOICE_CLIENT_MISSING)
         return
 
     if isinstance(voice_client, VoiceRecvClient):
         await stop_receiving(voice_client)
 
     await voice_client.disconnect(force=True)
-    await ctx.send("ボイスチャンネルから退出しました。")
+    await ctx.send(messages.VOICE_CHANNEL_LEFT)
 
 
 async def show_help(ctx: commands.Context) -> None:
-    await ctx.send(
-        "使い方:\n"
-        "`!join` で、あなたが入っている VC に Bot が参加します。\n"
-        "`!leave` で、文字起こしを止めて VC から退出します。\n"
-        "`!help` で、この案内をもう一度表示できます。"
-    )
+    await ctx.send(messages.HELP_TEXT)
