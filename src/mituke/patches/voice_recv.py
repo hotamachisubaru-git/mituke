@@ -35,6 +35,10 @@ _last_warning_at: dict[str, float] = {}
 
 
 def install_packet_decoder_guard(console: Console) -> None:
+    """PacketDecoder に耐障害パッチを適用する
+
+    デコードエラーや復号失敗を握りつぶし、音声受信を中断させないようにする
+    """
     _install_decoder_flush_warning_filter(console)
     if getattr(PacketDecoder, PATCH_FLAG, False):
         return
@@ -101,6 +105,10 @@ def install_packet_decoder_guard(console: Console) -> None:
 
 
 def _install_decoder_flush_warning_filter(console: Console) -> None:
+    """デコーダの flush 警告ログを抑制する
+
+    同一内容のログが大量に出るのを防ぐために一定間隔でのみ表示するようにする
+    """
     logger = logging.getLogger("discord.ext.voice_recv.opus")
     if any(getattr(flt, FLUSH_WARNING_FILTER_FLAG, False) for flt in logger.filters):
         return
