@@ -226,7 +226,9 @@ class TranscriptionSinkTests(unittest.IsolatedAsyncioTestCase):
         )
 
         user = SimpleNamespace(id=1, display_name="Alice", bot=False)
-        audio = SimpleNamespace(pcm=self._make_pcm(1600), packet=SimpleNamespace(ssrc=42))
+        audio = SimpleNamespace(
+            pcm=self._make_pcm(1600), packet=SimpleNamespace(ssrc=42)
+        )
 
         sink.write(user, audio)
         await asyncio.wait_for(sink.wait_for_idle(), 1)

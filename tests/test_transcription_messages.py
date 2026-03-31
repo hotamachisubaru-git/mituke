@@ -56,7 +56,9 @@ class TranscriptMessagePublisherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_finalize_without_text_deletes_pending_message(self) -> None:
         publisher = TranscriptMessagePublisher(FakeTextChannel())
-        await publisher.handle_start(SinkEvent(kind="start", user_id=1, display_name="Alice"))
+        await publisher.handle_start(
+            SinkEvent(kind="start", user_id=1, display_name="Alice")
+        )
 
         message = publisher.text_channel.messages[0]
 

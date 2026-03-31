@@ -17,7 +17,7 @@ class PendingAudioBuffer:
         _, buffer = self.audio_by_ssrc.get(ssrc, (now, bytearray()))
         buffer.extend(pcm)
         if len(buffer) > self.max_bytes:
-            del buffer[:-self.max_bytes]
+            del buffer[: -self.max_bytes]
         self.audio_by_ssrc[ssrc] = (now, buffer)
 
     def take(self, ssrc: int | None, now: float) -> bytes:

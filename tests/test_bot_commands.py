@@ -93,7 +93,9 @@ class FakeTextChannel:
 
 
 class FakeSink:
-    def __init__(self, *, text_channel: object, recognizer: object, loop: object) -> None:
+    def __init__(
+        self, *, text_channel: object, recognizer: object, loop: object
+    ) -> None:
         self.text_channel = text_channel
         self.recognizer = recognizer
         self.loop = loop
