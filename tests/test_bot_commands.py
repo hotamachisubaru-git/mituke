@@ -294,7 +294,7 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target_channel.connect_calls, [])
         self.assertEqual(
             ctx.sent_messages,
-            [vosk_model_load_failed(settings.vosk_model_path)],
+            [vosk_model_load_failed()],
         )
 
 

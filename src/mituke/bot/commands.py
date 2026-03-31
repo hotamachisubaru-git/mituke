@@ -33,7 +33,7 @@ async def start_listening(
         recognizer = VoskRecognizer(model_path=settings.vosk_model_path)
     except Exception as error:
         handle_listen_error(error)
-        await ctx.send(messages.vosk_model_load_failed(settings.vosk_model_path))
+        await ctx.send(messages.vosk_model_load_failed())
         return
 
     target_channel = voice_state.channel
