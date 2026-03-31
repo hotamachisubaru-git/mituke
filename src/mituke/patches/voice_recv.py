@@ -130,6 +130,10 @@ def _install_decoder_flush_warning_filter(console: Console) -> None:
 
 
 def _decode_missing_pcm(packet_decoder: PacketDecoder) -> bytes:
+    """デコーダーの状態に依存せずにデコードできるように補正する
+
+    既知のエラーが出た場合、無音の PCM で補完する
+    """
     decoder = getattr(packet_decoder, "_decoder", None)
     if decoder is None:
         return FALLBACK_PCM
