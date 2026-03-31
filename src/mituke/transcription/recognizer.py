@@ -12,11 +12,11 @@ class SpeechRecognizer(Protocol):
 
 
 class VoskRecognizer:
-    """Vosk-based speech recognizer factory"""
+    """Vosk の speech recognizer factory"""
 
     def __init__(self, model_path: Path) -> None:
         self.model = load_vosk_model(str(model_path.resolve()))
 
     def create(self) -> KaldiRecognizer:
-        """Create a KaldiRecognizer instance (per speaker)"""
+        """KaldiRecognizer instance を作成する (ユーザーごと)"""
         return KaldiRecognizer(self.model, 16000)
