@@ -58,7 +58,7 @@ class TranscriptionSink(AudioSink):
         self.processing_queue: queue.Queue[RecognitionTask] = queue.Queue()
         self.processor_thread = threading.Thread(
             target=self._recognition_worker,
-            name="mituke-vosk-recognition",
+            name="mituke-recognition",
             daemon=True,
         )
         self.event_queue: asyncio.Queue[SinkEvent] = asyncio.Queue()
