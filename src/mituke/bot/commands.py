@@ -9,7 +9,8 @@ from discord.ext.voice_recv import VoiceRecvClient
 from mituke.bot import messages
 from mituke.bot.voice import stop_receiving
 from mituke.config import Settings
-from mituke.transcription.sink import VoskSink
+from mituke.transcription.recognizer import VoskRecognizer
+from mituke.transcription.sink import TranscriptionSink
 
 
 async def start_listening(
@@ -42,9 +43,9 @@ async def start_listening(
 
     await stop_receiving(voice_client)
 
-    sink = VoskSink(
+    sink = TranscriptionSink(
         text_channel=ctx.channel,
-        model_path=settings.vosk_model_path,
+        recognizer=VoskRecognizer(model_path=settings.vosk_model_path),
         loop=asyncio.get_running_loop(),
     )
     voice_client.listen(sink, after=handle_listen_error)
