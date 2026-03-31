@@ -4,16 +4,15 @@ import asyncio
 import json
 import unittest
 from array import array
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from mituke.transcription.sink import VoskSink
+from mituke.transcription.sink import TranscriptionSink
 from mituke.transcription.state import MessageState
 
 
 class FakeRecognizer:
-    def __init__(self, _model: object, _sample_rate: int) -> None:
+    def __init__(self) -> None:
         self.accept_waveform = False
         self.result_text = ""
         self.partial_text = "あとから"
@@ -58,7 +57,17 @@ class FakeTextChannel:
         return message
 
 
-class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
+class FakeRecognizerFactory:
+    def __init__(self) -> None:
+        self.instances: list[FakeRecognizer] = []
+
+    def create(self) -> FakeRecognizer:
+        recognizer = FakeRecognizer()
+        self.instances.append(recognizer)
+        return recognizer
+
+
+class TranscriptionSinkTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _make_pcm(sample: int, samples: int = 320) -> bytes:
         return array("h", [sample] * samples).tobytes()
@@ -66,33 +75,22 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.text_channel = FakeTextChannel()
         self.loop = asyncio.get_running_loop()
+        self.recognizer_factory = FakeRecognizerFactory()
 
-        self.model_patcher = patch(
-            "mituke.transcription.sink.load_vosk_model",
-            return_value=object(),
-        )
-        self.recognizer_patcher = patch(
-            "mituke.transcription.sink.KaldiRecognizer",
-            FakeRecognizer,
-        )
         self.audio_patcher = patch(
             "mituke.transcription.sink.convert_pcm_48khz_stereo_to_16khz_mono",
             side_effect=lambda pcm, state=None: (pcm, state),
         )
 
-        self.model_patcher.start()
-        self.recognizer_patcher.start()
         self.audio_patcher.start()
 
     async def asyncTearDown(self) -> None:
         self.audio_patcher.stop()
-        self.recognizer_patcher.stop()
-        self.model_patcher.stop()
 
     async def test_request_stop_finalizes_pending_message(self) -> None:
-        sink = VoskSink(
+        sink = TranscriptionSink(
             text_channel=self.text_channel,
-            model_path=Path("."),
+            recognizer=self.recognizer_factory,
             loop=self.loop,
         )
         message = FakeMessage("Alice: 話し始めました。文字起こしを始めます…")
@@ -112,9 +110,9 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sink.worker_task.done())
 
     async def test_cleanup_ignores_late_audio_after_shutdown(self) -> None:
-        sink = VoskSink(
+        sink = TranscriptionSink(
             text_channel=self.text_channel,
-            model_path=Path("."),
+            recognizer=self.recognizer_factory,
             loop=self.loop,
         )
 
@@ -130,9 +128,9 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.text_channel.messages, [])
 
     async def test_buffers_audio_until_user_mapping_is_available(self) -> None:
-        sink = VoskSink(
+        sink = TranscriptionSink(
             text_channel=self.text_channel,
-            model_path=Path("."),
+            recognizer=self.recognizer_factory,
             loop=self.loop,
         )
 
@@ -166,9 +164,9 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_event_and_audio_fallback_do_not_duplicate_message(
         self,
     ) -> None:
-        sink = VoskSink(
+        sink = TranscriptionSink(
             text_channel=self.text_channel,
-            model_path=Path("."),
+            recognizer=self.recognizer_factory,
             loop=self.loop,
         )
 
@@ -195,9 +193,9 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         await sink.wait_closed()
 
     async def test_silent_audio_does_not_trigger_start_message(self) -> None:
-        sink = VoskSink(
+        sink = TranscriptionSink(
             text_channel=self.text_channel,
-            model_path=Path("."),
+            recognizer=self.recognizer_factory,
             loop=self.loop,
             speech_stop_grace_period=0.01,
         )
@@ -220,9 +218,9 @@ class VoskSinkTests(unittest.IsolatedAsyncioTestCase):
         await sink.wait_closed()
 
     async def test_brief_pause_keeps_same_transcription_session(self) -> None:
-        sink = VoskSink(
+        sink = TranscriptionSink(
             text_channel=self.text_channel,
-            model_path=Path("."),
+            recognizer=self.recognizer_factory,
             loop=self.loop,
             speech_stop_grace_period=0.05,
         )

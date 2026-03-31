@@ -19,6 +19,7 @@ from mituke.transcription.audio import (
 )
 from mituke.transcription.messages import TranscriptMessagePublisher
 from mituke.transcription.pending_audio import PendingAudioBuffer
+from mituke.transcription.recognizer import SpeechRecognizer
 from mituke.transcription.state import RecognitionState, RecognitionTask, SinkEvent
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
 
@@ -34,7 +35,7 @@ class TranscriptionSink(AudioSink):
     def __init__(
         self,
         text_channel: discord.abc.Messageable,
-        recognizer,
+        recognizer: SpeechRecognizer,
         loop: asyncio.AbstractEventLoop,
         partial_update_interval: float = 1.0,
         speech_stop_grace_period: float = SPEECH_STOP_GRACE_SECONDS,

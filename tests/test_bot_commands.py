@@ -93,10 +93,15 @@ class FakeTextChannel:
 
 
 class FakeSink:
-    def __init__(self, *, text_channel: object, model_path: Path, loop: object) -> None:
+    def __init__(self, *, text_channel: object, recognizer: object, loop: object) -> None:
         self.text_channel = text_channel
-        self.model_path = model_path
+        self.recognizer = recognizer
         self.loop = loop
+
+
+class FakeRecognizerFactory:
+    def __init__(self, *, model_path: Path) -> None:
+        self.model_path = model_path
 
 
 class FakeManagedSink:
@@ -172,7 +177,8 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("mituke.bot.commands.discord.Member", FakeMember),
             patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
-            patch("mituke.bot.commands.VoskSink", FakeSink),
+            patch("mituke.bot.commands.TranscriptionSink", FakeSink),
+            patch("mituke.bot.commands.VoskRecognizer", FakeRecognizerFactory),
             patch(
                 "mituke.bot.commands.asyncio.get_running_loop", return_value=fake_loop
             ),
@@ -185,7 +191,8 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         sink, after = target_channel.connected_client.listen_calls[0]
         self.assertIsInstance(sink, FakeSink)
         self.assertIs(sink.text_channel, ctx.channel)
-        self.assertEqual(sink.model_path, settings.vosk_model_path)
+        self.assertIsInstance(sink.recognizer, FakeRecognizerFactory)
+        self.assertEqual(sink.recognizer.model_path, settings.vosk_model_path)
         self.assertIs(sink.loop, fake_loop)
         self.assertIs(after, handle_listen_error)
         self.assertEqual(
@@ -214,7 +221,8 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("mituke.bot.commands.discord.Member", FakeMember),
             patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
-            patch("mituke.bot.commands.VoskSink", FakeSink),
+            patch("mituke.bot.commands.TranscriptionSink", FakeSink),
+            patch("mituke.bot.commands.VoskRecognizer", FakeRecognizerFactory),
             patch(
                 "mituke.bot.commands.asyncio.get_running_loop", return_value=object()
             ),
@@ -249,7 +257,8 @@ class StartListeningTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("mituke.bot.commands.discord.Member", FakeMember),
             patch("mituke.bot.commands.VoiceRecvClient", FakeVoiceRecvClient),
-            patch("mituke.bot.commands.VoskSink", FakeSink),
+            patch("mituke.bot.commands.TranscriptionSink", FakeSink),
+            patch("mituke.bot.commands.VoskRecognizer", FakeRecognizerFactory),
             patch(
                 "mituke.bot.commands.asyncio.get_running_loop", return_value=object()
             ),

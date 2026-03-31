@@ -8,15 +8,14 @@ from mituke.transcription.model import load_vosk_model
 
 class SpeechRecognizer(Protocol):
     def create(self) -> Any:
-        """話者ごとの新しい認識インスタンスを作成"""
+        """話者ごとの新しい認識インスタンスを作成する。"""
 
 
 class VoskRecognizer:
-    """Vosk-based speech recognizer factory"""
+    """Vosk ベースの認識器ファクトリ。"""
 
     def __init__(self, model_path: Path) -> None:
         self.model = load_vosk_model(str(model_path.resolve()))
 
     def create(self) -> KaldiRecognizer:
-        """Create a KaldiRecognizer instance (per speaker)"""
         return KaldiRecognizer(self.model, 16000)
