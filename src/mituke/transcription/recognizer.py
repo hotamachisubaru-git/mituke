@@ -24,21 +24,21 @@ class VoskRecognizer:
 
 
 class WhisperInstance:
-    """Stateful wrapper for faster-whisper"""
+    """faster-whisper のステートフルなラッパー"""
 
     def __init__(self, model: WhisperModel) -> None:
         self.model = model
         self.buffer = bytearray()
 
     def accept_waveform(self, pcm: bytes) -> bool:
-        """Append audio and decide when to run inference"""
+        """音声を追加し、推論を実行するタイミングを決定する"""
         self.buffer.extend(pcm)
 
         # 約1秒ごとに処理（16kHz, mono, 16bit）
         return len(self.buffer) >= 16000 * 2
 
     def result(self) -> str:
-        """Run transcription on current buffer"""
+        """現在のバッファで転写を実行する"""
         audio = np.frombuffer(self.buffer, dtype=np.int16).astype(np.float32) / 32768.0
 
         segments, _ = self.model.transcribe(audio, language="ja")
@@ -49,11 +49,11 @@ class WhisperInstance:
         return text
 
     def partial_result(self) -> str:
-        """Optional partial (same as result for now)"""
+        """オプションの部分的結果（現時点では結果と同じ）"""
         return self.result()
 
     def final_result(self) -> str:
-        """Flush remaining audio"""
+        """残りの音声をフラッシュする"""
         if not self.buffer:
             return ""
 
@@ -61,7 +61,7 @@ class WhisperInstance:
 
 
 class WhisperRecognizer:
-    """faster-whisper recognizer factory"""
+    """faster-whisper の認識器ファクトリ"""
 
     def __init__(self, model: WhisperModel) -> None:
         self.model = model
