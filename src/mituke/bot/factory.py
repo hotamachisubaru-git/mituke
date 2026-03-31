@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 from rich.console import Console
 
+from mituke.bot import messages
 from mituke.bot.commands import show_help, start_listening, stop_listening
 from mituke.bot.events import (
     handle_command_error,
@@ -23,7 +24,7 @@ def create_bot(settings: Settings, console: Console) -> commands.Bot:
 
     def handle_listen_error(error: Exception | None) -> None:
         if error is not None:
-            console.log(f"音声を受信しているときにエラーが発生しました: {error}")
+            console.log(messages.listen_error(error))
 
     @bot.command(name="join", aliases=["listen"])
     async def join_command(ctx: commands.Context) -> None:

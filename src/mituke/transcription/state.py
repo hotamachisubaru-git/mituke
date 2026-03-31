@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
 import discord
 from vosk import KaldiRecognizer
+
+RecognitionTaskKind: TypeAlias = Literal[
+    "audio",
+    "start",
+    "stop",
+    "stop_timeout",
+    "shutdown",
+]
+SinkEventKind: TypeAlias = Literal["start", "update", "finalize", "shutdown"]
 
 
 @dataclass
@@ -26,8 +35,19 @@ class MessageState:
 
 
 @dataclass(frozen=True)
+class RecognitionTask:
+    kind: RecognitionTaskKind
+    user_id: int | None = None
+    display_name: str = ""
+    pcm: bytes = b""
+    ssrc: int | None = None
+    received_at: float = 0.0
+    token: int = 0
+
+
+@dataclass(frozen=True)
 class SinkEvent:
-    kind: str
+    kind: SinkEventKind
     user_id: int
     display_name: str
     text: str = ""

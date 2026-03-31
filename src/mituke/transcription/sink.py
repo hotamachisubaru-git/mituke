@@ -5,7 +5,6 @@ import json
 import queue
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +19,10 @@ from mituke.transcription.audio import (
     convert_pcm_48khz_stereo_to_16khz_mono,
     trim_leading_silence,
 )
+from mituke.transcription.messages import TranscriptMessagePublisher
 from mituke.transcription.model import load_vosk_model
-from mituke.transcription.state import MessageState, RecognitionState, SinkEvent
+from mituke.transcription.pending_audio import PendingAudioBuffer
+from mituke.transcription.state import RecognitionState, RecognitionTask, SinkEvent
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
 
 console = Console()
@@ -30,17 +31,6 @@ PENDING_AUDIO_MAX_BYTES = (
     Decoder.SAMPLING_RATE * Decoder.CHANNELS * PCM_SAMPLE_WIDTH_BYTES
 )
 SPEECH_STOP_GRACE_SECONDS = 0.8
-
-
-@dataclass(frozen=True)
-class RecognitionTask:
-    kind: str
-    user_id: int | None = None
-    display_name: str = ""
-    pcm: bytes = b""
-    ssrc: int | None = None
-    received_at: float = 0.0
-    token: int = 0
 
 
 class VoskSink(AudioSink):
@@ -59,8 +49,12 @@ class VoskSink(AudioSink):
         self.speech_stop_grace_period = speech_stop_grace_period
         self.model = load_vosk_model(str(model_path.resolve()))
         self.recognition_states: dict[int, RecognitionState] = {}
-        self.message_states: dict[int, MessageState] = {}
-        self.pending_audio_by_ssrc: dict[int, tuple[float, bytearray]] = {}
+        self.message_publisher = TranscriptMessagePublisher(text_channel)
+        self.message_states = self.message_publisher.message_states
+        self.pending_audio = PendingAudioBuffer(
+            retention_seconds=PENDING_AUDIO_RETENTION_SECONDS,
+            max_bytes=PENDING_AUDIO_MAX_BYTES,
+        )
         self.state_lock = threading.Lock()
         self.shutdown_requested = threading.Event()
         self.processing_queue: queue.Queue[RecognitionTask] = queue.Queue()
@@ -179,13 +173,14 @@ class VoskSink(AudioSink):
 
     def _process_audio(self, task: RecognitionTask) -> None:
         if task.user_id is None:
-            self._remember_pending_audio(task.ssrc, task.pcm, task.received_at)
+            with self.state_lock:
+                self.pending_audio.remember(task.ssrc, task.pcm, task.received_at)
             return
 
         should_queue_start = False
         display_text = ""
         with self.state_lock:
-            pending_audio = self._take_pending_audio(task.ssrc, task.received_at)
+            pending_audio = self.pending_audio.take(task.ssrc, task.received_at)
             current_state = self._get_or_create_state(task.user_id, task.display_name)
             current_state.display_name = task.display_name
             current_state.activity_token += 1
@@ -268,66 +263,17 @@ class VoskSink(AudioSink):
                 }:
                     continue
                 if event.kind == "start":
-                    await self._handle_start(event)
+                    await self.message_publisher.handle_start(event)
                 elif event.kind == "update":
-                    await self._handle_update(event)
+                    await self.message_publisher.handle_update(event)
                 elif event.kind == "finalize":
-                    await self._handle_finalize(event)
+                    await self.message_publisher.handle_finalize(event)
             except discord.HTTPException as error:
                 console.log(f"Discord への送信に失敗しました: {error}")
             except Exception as error:
                 console.log(f"文字起こし処理で予期しないエラーが発生しました: {error}")
             finally:
                 self.event_queue.task_done()
-
-    async def _handle_start(self, event: SinkEvent) -> None:
-        message_state = self.message_states.get(event.user_id)
-        if message_state and message_state.message is not None:
-            return
-
-        content = f"{event.display_name}: 話し始めました。文字起こしを始めます…"
-        message = await self.text_channel.send(content)
-        self.message_states[event.user_id] = MessageState(
-            message=message,
-            last_content=content,
-        )
-
-    async def _handle_update(self, event: SinkEvent) -> None:
-        if not event.text:
-            return
-
-        content = f"{event.display_name}: {event.text}"
-        message_state = self.message_states.get(event.user_id)
-
-        if message_state is None or message_state.message is None:
-            message = await self.text_channel.send(content)
-            self.message_states[event.user_id] = MessageState(
-                message=message,
-                last_content=content,
-            )
-            return
-
-        if message_state.last_content == content:
-            return
-
-        await message_state.message.edit(content=content)
-        message_state.last_content = content
-
-    async def _handle_finalize(self, event: SinkEvent) -> None:
-        message_state = self.message_states.pop(event.user_id, None)
-
-        if not event.text:
-            if message_state and message_state.message is not None:
-                await message_state.message.delete()
-            return
-
-        content = f"{event.display_name}: {event.text}"
-        if message_state is None or message_state.message is None:
-            await self.text_channel.send(content)
-            return
-
-        if message_state.last_content != content:
-            await message_state.message.edit(content=content)
 
     def _get_or_create_state(self, user_id: int, display_name: str) -> RecognitionState:
         current_state = self.recognition_states.get(user_id)
@@ -406,47 +352,6 @@ class VoskSink(AudioSink):
                 "イベントループ停止後のため、発話終了待ちタイマーを破棄しました。"
             )
 
-    def _remember_pending_audio(
-        self,
-        ssrc: int | None,
-        pcm: bytes,
-        now: float,
-    ) -> None:
-        if ssrc is None:
-            return
-
-        with self.state_lock:
-            self._discard_stale_pending_audio(now)
-            _, buffer = self.pending_audio_by_ssrc.get(ssrc, (now, bytearray()))
-            buffer.extend(pcm)
-            if len(buffer) > PENDING_AUDIO_MAX_BYTES:
-                del buffer[:-PENDING_AUDIO_MAX_BYTES]
-            self.pending_audio_by_ssrc[ssrc] = (now, buffer)
-
-    def _take_pending_audio(self, ssrc: int | None, now: float) -> bytes:
-        self._discard_stale_pending_audio(now)
-        if ssrc is None:
-            return b""
-
-        pending_audio = self.pending_audio_by_ssrc.pop(ssrc, None)
-        if pending_audio is None:
-            return b""
-
-        updated_at, buffer = pending_audio
-        if now - updated_at > PENDING_AUDIO_RETENTION_SECONDS:
-            return b""
-
-        return bytes(buffer)
-
-    def _discard_stale_pending_audio(self, now: float) -> None:
-        stale_ssrcs = [
-            ssrc
-            for ssrc, (updated_at, _) in self.pending_audio_by_ssrc.items()
-            if now - updated_at > PENDING_AUDIO_RETENTION_SECONDS
-        ]
-        for ssrc in stale_ssrcs:
-            self.pending_audio_by_ssrc.pop(ssrc, None)
-
     def request_stop(self) -> None:
         self._begin_shutdown()
 
@@ -475,7 +380,7 @@ class VoskSink(AudioSink):
                 (user_id, current_state.display_name)
                 for user_id, current_state in self.recognition_states.items()
             ]
-            self.pending_audio_by_ssrc.clear()
+            self.pending_audio.clear()
 
         for user_id, display_name in pending_speakers:
             final_text = self._finalize_user_session(user_id)
