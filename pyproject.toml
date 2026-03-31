@@ -16,6 +16,8 @@ dependencies = [
     "rich>=14.3.3",
     "vosk>=0.3.45",
     "davey>=0.1.4",
+    "numpy>=2.4.4",
+    "faster-whisper>=1.2.1",
 ]
 
 [tool.setuptools]

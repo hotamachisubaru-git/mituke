@@ -5,11 +5,13 @@ import asyncio
 import discord
 from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
+from faster_whisper import WhisperModel
 
 from mituke.bot import messages
 from mituke.bot.voice import stop_receiving
 from mituke.config import Settings
-from mituke.transcription.recognizer import VoskRecognizer
+from mituke.transcription import VoskRecognizer
+from mituke.transcription.recognizer import WhisperRecognizer
 from mituke.transcription.sink import TranscriptionSink
 
 
@@ -43,11 +45,22 @@ async def start_listening(
 
     await stop_receiving(voice_client)
 
+    """
+    sink = TranscriptionSink(
+        text_channel=ctx.channel,
+        recognizer=WhisperRecognizer(
+            model=WhisperModel("base", device="cpu", compute_type="int8")
+        ),
+        loop=asyncio.get_running_loop(),
+    )
+    """
+
     sink = TranscriptionSink(
         text_channel=ctx.channel,
         recognizer=VoskRecognizer(model_path=settings.vosk_model_path),
         loop=asyncio.get_running_loop(),
     )
+
     voice_client.listen(sink, after=handle_listen_error)
 
     await ctx.send(messages.joined_voice_channel(target_channel.name))
