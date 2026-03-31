@@ -5,14 +5,12 @@ import json
 import queue
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 import discord
-from discord.opus import Decoder
 from discord.ext.voice_recv import AudioSink
+from discord.opus import Decoder
 from rich.console import Console
-from vosk import KaldiRecognizer
 
 from mituke.transcription.audio import (
     PCM_SAMPLE_WIDTH_BYTES,
@@ -20,7 +18,6 @@ from mituke.transcription.audio import (
     trim_leading_silence,
 )
 from mituke.transcription.messages import TranscriptMessagePublisher
-from mituke.transcription.model import load_vosk_model
 from mituke.transcription.pending_audio import PendingAudioBuffer
 from mituke.transcription.state import RecognitionState, RecognitionTask, SinkEvent
 from mituke.transcription.text import join_transcript_parts, normalize_transcript
@@ -33,11 +30,11 @@ PENDING_AUDIO_MAX_BYTES = (
 SPEECH_STOP_GRACE_SECONDS = 0.8
 
 
-class VoskSink(AudioSink):
+class TranscriptionSink(AudioSink):
     def __init__(
         self,
         text_channel: discord.abc.Messageable,
-        model_path: Path,
+        recognizer,
         loop: asyncio.AbstractEventLoop,
         partial_update_interval: float = 1.0,
         speech_stop_grace_period: float = SPEECH_STOP_GRACE_SECONDS,
@@ -45,9 +42,9 @@ class VoskSink(AudioSink):
         super().__init__()
         self.text_channel = text_channel
         self.loop = loop
+        self.recognizer = recognizer
         self.partial_update_interval = partial_update_interval
         self.speech_stop_grace_period = speech_stop_grace_period
-        self.model = load_vosk_model(str(model_path.resolve()))
         self.recognition_states: dict[int, RecognitionState] = {}
         self.message_publisher = TranscriptMessagePublisher(text_channel)
         self.message_states = self.message_publisher.message_states
@@ -279,7 +276,7 @@ class VoskSink(AudioSink):
         current_state = self.recognition_states.get(user_id)
         if current_state is None:
             current_state = RecognitionState(
-                recognizer=KaldiRecognizer(self.model, 16000),
+                recognizer=self.recognizer.create(),
                 display_name=display_name,
             )
             self.recognition_states[user_id] = current_state
